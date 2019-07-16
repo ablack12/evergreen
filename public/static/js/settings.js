@@ -80,13 +80,14 @@ mciModule.controller('SettingsCtrl', ['$scope', '$http', '$window', 'notificatio
       });
   }
 
-  $scope.updateUserSettings = function(new_tz, new_waterfall) {
+  $scope.updateUserSettings = function(new_tz, new_waterfall, alternate_palette) {
     data = {
         timezone: new_tz,
         new_waterfall: new_waterfall,
         github_user: {
             last_known_as: $scope.github_user,
-        }
+        },
+        alternate_palette: alternate_palette
     };
     var success = function() {
       window.location.reload();
