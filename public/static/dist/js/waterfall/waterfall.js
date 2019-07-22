@@ -260,6 +260,7 @@ var Root = function (_React$PureComponent2) {
         collapsed: this.state.collapsed,
         activeTaskStatuses: ['failed', 'system-failed']
       };
+      console.log("render.js/useAlternatePalette: ", this.props.useAlternatePalette);
       return React.createElement(
         "div",
         null,
@@ -292,7 +293,8 @@ var Root = function (_React$PureComponent2) {
           collapseInfo: collapseInfo,
           project: this.props.project,
           buildVariantFilter: this.state.buildVariantFilter,
-          taskFilter: this.state.taskFilter
+          taskFilter: this.state.taskFilter,
+          useAlternatePalette: this.props.useAlternatePalette,
         })
       );
     }

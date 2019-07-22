@@ -205,7 +205,8 @@ class Root extends React.PureComponent {
   }
 
   render() {
-    if (this.state.data && this.state.data.rows.length == 0){
+      console.log("render/useAlternatePalette: ", this.props.useAlternatePalette);
+      if (this.state.data && this.state.data.rows.length == 0){
       return (
         <div>
           There are no builds for this project.
@@ -248,6 +249,7 @@ class Root extends React.PureComponent {
           project={this.props.project}
           buildVariantFilter={this.state.buildVariantFilter}
           taskFilter={this.state.taskFilter}
+          useAlternatePalette={this.props.useAlternatePalette}
         />
       </div>
     )

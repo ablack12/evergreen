@@ -8,8 +8,9 @@
 
 
 <script type="text/javascript">
-  window.userTz = {{GetTimezone .User}}
-  window.jiraHost = {{.JiraHost}}
+  window.userTz = {{GetTimezone .User}};
+  window.useAlternatePalette = {{UseAlternatePalette .User}};
+  window.jiraHost = {{.JiraHost}};
   window.user = {{if .User}}{{.User}}{{else}}null{{end}};
 </script>
 

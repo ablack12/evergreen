@@ -1,7 +1,7 @@
 <div>
   <h6><strong>[[currentTaskName]]</strong> on <strong>[[currentBuildVariant]]</strong></h6>
   <div class="current-task-run">
-    <span class="tooltip-task-status" ng-class="currentCell.current | statusFilter">&nbsp;</span>
+    <span class="tooltip-task-status" ng-class="currentCell.current | statusFilter:useAlternatePalette">&nbsp;</span>
     <a href="/task/[[currentCell.current.id]]" class="gitspec">[[currentCell.current.revision.substr(0,5)]]</a>
     <span>[[getRevisionMessage(currentCell.current.revision)]]</span>
   </div>

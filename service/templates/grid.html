@@ -8,6 +8,7 @@
   var revisionFailures = {{.RevisionFailures}};
   var failures = {{.Failures}}
   var userTz = {{GetTimezone $.User}};
+  var useAlternatePalette = {{UseAlternatePalette $.User}};
 </script>
 {{end}}
 {{define "title"}}
@@ -98,7 +99,7 @@ Evergreen - Grid
               <tr ng-repeat="field in failure.fields = (failure.fields | orderBy: selectedHeader.by: selectedHeader.order)">
                 <td align="center">
                   <a class="failure-link" ng-href="/task/[[field.task_id]]">
-                    <span class="tooltip-task-status failed" ng-class="task | statusFilter">&nbsp;</span>
+                    <span class="tooltip-task-status failed" ng-class="task | statusFilter:{useAlternatePalette}">&nbsp;</span>
                   </a>
                 </td>
                 <td ng-repeat="(index, header) in currentHeaders">

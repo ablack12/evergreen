@@ -25,12 +25,12 @@ function endOfPath(input) {
 
 // taskStatusClass returns the css class that should be associated with a given task so that it can
 // be properly styled.
-function taskStatusClass(task) {
+function taskStatusClass(task, useAlternatePalette) {
   if (task !== Object(task)) {
     return '';
   }
-
-  if (task.status == 'undispatched') {
+  console.log("taskStatusClass.js/useAlternatePalette: ", useAlternatePalette);
+    if (task.status == 'undispatched') {
     if (!task.activated) {
       return 'inactive';
     } else {
@@ -44,11 +44,17 @@ function taskStatusClass(task) {
         return 'system-failed';
       }
       if ('type' in task.task_end_details && task.task_end_details.type == 'setup') {
+        if (useAlternatePalette) {
+          return 'setup-failed-alternate-grid';
+        }
         return 'setup-failed';
       }
       if (!!task.task_end_details.timed_out && task.task_end_details.desc == 'heartbeat') {
         return 'system-failed';
       }
+    }
+    if (useAlternatePalette) {
+      return 'failed-alternate-grid';
     }
     return 'failed';
   }
@@ -130,11 +136,13 @@ function stringifyNanoseconds(input, skipDayMax, skipSecMax) {
 
 // The main class that binds to the root div. This contains all the distros, builds, and tasks
 function Grid(_ref) {
+  console.log("Why am I here? ", _ref.useAlternatePalette);
   var data = _ref.data,
       project = _ref.project,
       collapseInfo = _ref.collapseInfo,
       buildVariantFilter = _ref.buildVariantFilter,
-      taskFilter = _ref.taskFilter;
+      taskFilter = _ref.taskFilter,
+      useAlternatePalette = _ref.useAlternatePalette;
 
   if (!data) {
     return React.createElement(GridTombstone, null);
@@ -152,7 +160,8 @@ function Grid(_ref) {
         collapseInfo: collapseInfo,
         versions: data.versions,
         taskFilter: taskFilter,
-        currentTime: data.current_time
+        currentTime: data.current_time,
+        useAlternatePalette: useAlternatePalette,
       });
     })
   );
@@ -172,9 +181,11 @@ function Variant(_ref2) {
       project = _ref2.project,
       collapseInfo = _ref2.collapseInfo,
       taskFilter = _ref2.taskFilter,
-      currentTime = _ref2.currentTime;
+      currentTime = _ref2.currentTime,
+      useAlternatePalette = _ref2.useAlternatePalette;
 
-  return React.createElement(
+    console.log("Variant.js/useAlternatePalette: ", useAlternatePalette);
+    return React.createElement(
     'div',
     { className: 'row variant-row' },
     React.createElement(
@@ -197,7 +208,8 @@ function Variant(_ref2) {
               rolledUp: version.rolled_up,
               collapseInfo: collapseInfo,
               taskFilter: taskFilter,
-              currentTime: currentTime
+              currentTime: currentTime,
+              useAlternatePalette: useAlternatePalette
             })
           );
         })
@@ -214,8 +226,10 @@ function Build(_ref3) {
       collapseInfo = _ref3.collapseInfo,
       rolledUp = _ref3.rolledUp,
       taskFilter = _ref3.taskFilter,
-      currentTime = _ref3.currentTime;
+      currentTime = _ref3.currentTime,
+      useAlternatePalette = _ref3.useAlternatePalette;
 
+  console.log("Build.js/useAlternatePalette: ", useAlternatePalette);
   // inactive build
   if (rolledUp) {
     return React.createElement(InactiveBuild, null);
@@ -238,19 +252,20 @@ function Build(_ref3) {
       'div',
       null,
       React.createElement(CollapsedBuild, { build: build, activeTaskStatuses: collapseInfo.activeTaskStatuses }),
-      React.createElement(ActiveBuild, { tasks: activeTasks, currentTime: currentTime })
+      React.createElement(ActiveBuild, { tasks: activeTasks, currentTime: currentTime, useAlternatePalette: useAlternatePalette })
     );
   }
   // uncollapsed active build
-  return React.createElement(ActiveBuild, { tasks: build.tasks, taskFilter: taskFilter, currentTime: currentTime });
+  return React.createElement(ActiveBuild, { tasks: build.tasks, taskFilter: taskFilter, currentTime: currentTime, useAlternatePalette: useAlternatePalette });
 }
 
 // At least one task in the version is not inactive, so we display all build tasks with their appropiate colors signifying their status
 function ActiveBuild(_ref4) {
   var tasks = _ref4.tasks,
       taskFilter = _ref4.taskFilter,
-      currentTime = _ref4.currentTime;
-
+      currentTime = _ref4.currentTime,
+      useAlternatePalette = _ref4.useAlternatePalette;
+    console.log("ActiveBuild.js/useAlternatePalette: ", useAlternatePalette);
   if (taskFilter != null) {
     tasks = _.filter(tasks, function (task) {
       return task.display_name.toLowerCase().indexOf(taskFilter.toLowerCase()) != -1;
@@ -261,7 +276,7 @@ function ActiveBuild(_ref4) {
     'div',
     { className: 'active-build' },
     _.map(tasks, function (task) {
-      return React.createElement(Task, { key: task.id, task: task, currentTime: currentTime });
+      return React.createElement(Task, { key: task.id, task: task, currentTime: currentTime, useAlternatePalette: useAlternatePalette });
     })
   );
 }
@@ -449,7 +464,9 @@ var ETADisplay = function (_React$Component) {
 
 function Task(_ref6) {
   var task = _ref6.task,
-      currentTime = _ref6.currentTime;
+      currentTime = _ref6.currentTime,
+      useAlternatePalette = _ref6.useAlternatePalette;
+  console.log("Task.js/useAlternatePalette: ", useAlternatePalette);
 
   var OverlayTrigger = ReactBootstrap.OverlayTrigger;
   var Popover = ReactBootstrap.Popover;
@@ -477,7 +494,7 @@ function Task(_ref6) {
   return React.createElement(
     OverlayTrigger,
     { placement: 'top', overlay: tooltip, animation: false },
-    React.createElement('a', { href: "/task/" + task.id, className: "waterfall-box " + taskStatusClass(task) })
+    React.createElement('a', { href: "/task/" + task.id, className: "waterfall-box " + taskStatusClass(task, useAlternatePalette) })
   );
 }
 

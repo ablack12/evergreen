@@ -40,7 +40,8 @@ mciModule.controller('BuildVariantHistoryController',['$scope', '$filter','$wind
 
   $scope.getGridClass = function(cell) {
     if (cell) {
-      return $filter('statusFilter')(cell);
+      var palette = $window.user.Settings.alternate_palette;
+      return $filter('statusFilter')(cell, palette); 
     }
 
     return "skipped";

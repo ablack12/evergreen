@@ -16,14 +16,16 @@ mciModule.factory('RestartUtil', function($filter) {
       SYSTEM_FAILURES: {
         name: 'System Failures',
         matches: function(task) {
-          var status = $filter('statusFilter')(task);
+          var status = $filter('statusFilter')(task, false);
           return (status == 'system-failed' || status == 'system-unresponsive');
         }
       },
       SETUP_FAILURES: {
         name: 'Setup Failures',
         matches: function(task) {
-          return $filter('statusFilter')(task) == 'setup-failed'
+          var palette = $window.user.Settings.alternate_palette;
+          var status = $filter('statusFilter')(task, palette);
+          return (status == 'setup-failed' || status == 'setup-failed-alternate')
         }
       },
     }

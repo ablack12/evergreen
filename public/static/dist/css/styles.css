@@ -184,6 +184,10 @@ h3.section-heading {
 .progress-bar-failed {
   background-color: #d9534f;
 }
+.progress-bar-failed-alternate,
+.progress-bar-danger-alternate {
+  background-color: #0099ff;
+}
 .progress-bar-silently-failed {
   background-color: #e7908e;
 }
@@ -288,6 +292,19 @@ h3.section-heading {
   background-color: #d9534f;
   color: white;
 }
+.failed-alternate,
+.test-timed-out-alternate {
+  background: #0099ff;
+  color: white;
+}
+.failed-alternate-grid,
+.test-timed-out-alternate-grid {
+  background: #0099ff url('/static/img/failed-x.png');
+  background-size: cover,contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  color: white;
+}
 .dispatched {
   background-color: #ffb618;
 }
@@ -304,6 +321,17 @@ h3.section-heading {
 }
 .setup-failed {
   background-color: #C2A5CF;
+  color: white;
+}
+.setup-failed-alternate {
+  background-color: #E197C0;
+  color: white;
+}
+.setup-failed-alternate-grid {
+  background-color: #E197C0 url('/static/img/question-sign.png');
+  background-size: cover,contain;
+  background-position: center;
+  background-repeat: no-repeat;
   color: white;
 }
 .unstarted {
@@ -345,6 +373,10 @@ h3.section-heading {
 }
 .result-slice.failed {
   background-color: #d9534f;
+  color: white;
+}
+.result-slice.failed-alternate {
+  background-color: #0099ff;
   color: white;
 }
 .result-slice.system-failed {
@@ -951,6 +983,9 @@ ul.tooltip-tasks li.tooltip-task {
 }
 .cell.failed {
   background-color: #FF4040;
+}
+.cell.failed-alternate {
+  background-color: #0099FF;
 }
 .cell.system-failed {
   background-color: #800080;
@@ -1965,6 +2000,9 @@ pre {
 }
 .task.block-status-undispatched {
   background-color: #dee0e3;
+}
+.task.block-status-failed-alternate {
+  background-color: #0099ff;
 }
 .timeline-version {
   position: relative;

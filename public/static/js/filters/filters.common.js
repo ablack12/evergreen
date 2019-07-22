@@ -322,9 +322,15 @@ filters.common.filter('conditional', function() {
 })
 
 .filter('statusFilter', function() {
-  return function(task) {
-    // for task test results, return the status passed in
+  return function(task, useAlternatePalette) {
+      // for task test results, return the status passed in
     if (task !== Object(task)) {
+      if (task.status == 'failed' && useAlternatePalette) {
+        return 'failed-alternate';
+      }
+      if (task.status == 'setup-failed' && useAlternatePalette) {
+        return 'setup-failed-alternate';
+      }
       return task;
     }
     var cls = task.status;
@@ -334,6 +340,9 @@ filters.common.filter('conditional', function() {
       cls = 'success';
     } else if (task.status == 'failed') {
       cls = 'failed';
+      if (useAlternatePalette) {
+        cls = 'failed-alternate';
+      }
       // Get a property name where task details are stored
       // Name may differe from API to API
       let detailsProp = _.find(['task_end_details', 'status_details'],  d => d in task)
@@ -344,7 +353,10 @@ filters.common.filter('conditional', function() {
             cls = 'system-failed';
           }
           if (details.type == 'setup' && details.status != 'success') {
-            cls = 'setup-failed';
+              cls = 'setup-failed';
+              if (useAlternatePalette) {
+                cls = 'setup-failed-alternate';
+              }
           }
         }
         if ('timed_out' in details) {

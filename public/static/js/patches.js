@@ -33,7 +33,6 @@ mciModule.controller('PatchesController', function($scope, $filter, $http, $wind
       $scope.loading = false;
       $scope.versionsMap = data['VersionsMap'];
       $scope.uiPatches = data['UIPatches'];
-
       _.each($scope.uiPatches, function(patch) {
           patch.canEdit = ($window.user.Id === patch.Patch.Author ) || $window.isSuperUser
       });
@@ -42,10 +41,11 @@ mciModule.controller('PatchesController', function($scope, $filter, $http, $wind
         _.each(version.Builds, function(build) {
           build.taskResults = [];
           _.each(build.Tasks, function(task) {
+            var palette = $window.user.Settings.alternate_palette;
             build.taskResults.push({
               link: '/task/' + task.Task.id,
               tooltip: task.Task.display_name,
-              'class': $filter('statusFilter')(task.Task),
+              'class': $filter('statusFilter')(task.Task, palette),
             });
           });
         });

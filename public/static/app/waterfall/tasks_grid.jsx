@@ -15,7 +15,8 @@ function endOfPath(input) {
 
 // taskStatusClass returns the css class that should be associated with a given task so that it can
 // be properly styled.
-function taskStatusClass(task) {
+function taskStatusClass(task, useAlternatePalette) {
+  console.log("taskStatusClass/useAlternatePalette: ", useAlternatePalette);
   if (task !== Object(task)) {
 	  return '';
   }
@@ -31,14 +32,20 @@ function taskStatusClass(task) {
   if (task.status == 'failed') {
     if ('task_end_details' in task) {
       if ('type' in task.task_end_details && task.task_end_details.type == 'system') {
-         return 'system-failed';
+        return 'system-failed';
       }
       if ('type' in task.task_end_details && task.task_end_details.type == 'setup') {
-         return 'setup-failed';
+        if (useAlternatePalette) {
+            return 'setup-failed-alternate-grid';
+        }
+        return 'setup-failed';
       }
       if (!!task.task_end_details.timed_out && task.task_end_details.desc == 'heartbeat') {
         return 'system-failed';
       }
+    }
+    if (useAlternatePalette) {
+      return 'failed-alternate-grid';
     }
     return 'failed';
   }
@@ -121,8 +128,9 @@ function stringifyNanoseconds(input, skipDayMax, skipSecMax) {
 // Grid
 
 // The main class that binds to the root div. This contains all the distros, builds, and tasks
-function Grid ({data, project, collapseInfo, buildVariantFilter, taskFilter}) {
-  if (!data) {
+function Grid ({data, project, collapseInfo, buildVariantFilter, taskFilter, useAlternatePalette}) {
+    console.log("Grid/useAlternatePalette: ", useAlternatePalette);
+    if (!data) {
     return (<GridTombstone />);
   }
   return (
@@ -141,6 +149,7 @@ function Grid ({data, project, collapseInfo, buildVariantFilter, taskFilter}) {
               versions={data.versions}
               taskFilter={taskFilter}
               currentTime={data.current_time}
+              useAlternatePalette={useAlternatePalette}
             />
           );
         })
@@ -157,8 +166,9 @@ function filterActiveTasks(tasks, activeStatuses){
 
 // The class for each "row" of the waterfall page. Includes the build variant link, as well as the five columns
 // of versions.
-function Variant({row, versions, project, collapseInfo, taskFilter, currentTime}) {
-      return (
+function Variant({row, versions, project, collapseInfo, taskFilter, currentTime, useAlternatePalette}) {
+    console.log("Variant/useAlternatePalette: ", useAlternatePalette);
+    return (
       <div className="row variant-row">
         <div className="col-xs-2 build-variants">
           {row.build_variant.display_name}
@@ -175,6 +185,7 @@ function Variant({row, versions, project, collapseInfo, taskFilter, currentTime}
                         collapseInfo={collapseInfo}
                         taskFilter={taskFilter}
                         currentTime={currentTime}
+                        useAlternatePalette={useAlternatePalette}
                       />
                     </div>
                   );
@@ -189,8 +200,9 @@ function Variant({row, versions, project, collapseInfo, taskFilter, currentTime}
 // Each Build class is one group of tasks for an version + build variant intersection
 // We case on whether or not a build is active or not, and return either an ActiveBuild or InactiveBuild respectively
 
-function Build({build, collapseInfo, rolledUp, taskFilter, currentTime}){
-  // inactive build
+function Build({build, collapseInfo, rolledUp, taskFilter, currentTime, useAlternatePalette}){
+    console.log("Build/useAlternatePalette: ", useAlternatePalette);
+    // inactive build
   if (rolledUp) {
     return (<InactiveBuild/>);
   }
@@ -214,19 +226,21 @@ function Build({build, collapseInfo, rolledUp, taskFilter, currentTime}){
     return (
       <div>
         <CollapsedBuild build={build} activeTaskStatuses={collapseInfo.activeTaskStatuses} />
-        <ActiveBuild tasks={activeTasks} currentTime={currentTime}/>
+        <ActiveBuild tasks={activeTasks} currentTime={currentTime} useAlternatePalette={useAlternatePalette}/>
       </div>
     )
   }
   // uncollapsed active build
   return (
-      <ActiveBuild tasks={build.tasks} taskFilter={taskFilter} currentTime={currentTime}/>
+      <ActiveBuild tasks={build.tasks} taskFilter={taskFilter} currentTime={currentTime} useAlternatePalette={useAlternatePalette}/>
   )
 }
 
 // At least one task in the version is not inactive, so we display all build tasks with their appropiate colors signifying their status
-function ActiveBuild({tasks, taskFilter, currentTime}){
-  if (taskFilter != null){
+function ActiveBuild({tasks, taskFilter, currentTime, useAlternatePalette}){
+    console.log("ActiveBuild/useAlternatePalette: ", useAlternatePalette);
+
+    if (taskFilter != null){
     tasks = _.filter(tasks, function(task){
       return task.display_name.toLowerCase().indexOf(taskFilter.toLowerCase()) != -1;
     });
@@ -236,7 +250,7 @@ function ActiveBuild({tasks, taskFilter, currentTime}){
     <div className="active-build">
       {
         _.map(tasks, function(task){
-          return <Task key={task.id} task={task} currentTime={currentTime}/>
+          return <Task key={task.id} task={task} currentTime={currentTime} useAlternatePalette={useAlternatePalette}/>
         })
       }
     </div>
@@ -371,8 +385,9 @@ class ETADisplay extends React.Component {
 
 
 // A Task contains the information for a single task for a build, including the link to its page, and a tooltip
-function Task({task, currentTime}) {
-  var OverlayTrigger = ReactBootstrap.OverlayTrigger;
+function Task({task, currentTime, useAlternatePalette}) {
+    console.log("Task/useAlternatePalette: ", useAlternatePalette);
+    var OverlayTrigger = ReactBootstrap.OverlayTrigger;
   var Popover = ReactBootstrap.Popover;
   var Tooltip = ReactBootstrap.Tooltip;
   var eta;
@@ -397,7 +412,7 @@ function Task({task, currentTime}) {
       )
   return (
     <OverlayTrigger placement="top" overlay={tooltip} animation={false}>
-      <a href={"/task/" + task.id} className={"waterfall-box " + taskStatusClass(task)} />
+      <a href={"/task/" + task.id} className={"waterfall-box " + taskStatusClass(task, useAlternatePalette)} />
     </OverlayTrigger>
   )
 }

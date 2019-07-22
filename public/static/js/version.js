@@ -173,8 +173,9 @@ mciModule.controller('VersionController', function($scope, $rootScope, $location
       $scope.taskStatuses[version.Builds[i].Build._id] = [];
       for (var j = 0; j < version.Builds[i].Tasks.length; ++j) {
         row[version.Builds[i].Tasks[j].Task.display_name] = version.Builds[i].Tasks[j].Task;
+        var palette = $window.user.Settings.alternate_palette;
         $scope.taskStatuses[version.Builds[i].Build._id].push({
-          "class": $filter('statusFilter')(version.Builds[i].Tasks[j].Task),
+          "class": $filter('statusFilter')(version.Builds[i].Tasks[j].Task, palette),
           "tooltip": version.Builds[i].Tasks[j].Task.display_name + " - " + $filter('statusLabel')(version.Builds[i].Tasks[j].Task),
           "link": "/task/" + version.Builds[i].Tasks[j].Task.id
         });

@@ -46,7 +46,7 @@ func main() {
 	)
 
 	flag.StringVar(&path, "path", filepath.Join(wd, "testdata", "smoke"), "load data from json files from these paths")
-	flag.StringVar(&dbName, "dbName", "mci_smoke", "database name for directory")
+	flag.StringVar(&dbName, "dbName", "mci", "database name for directory")
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -39,7 +39,8 @@ directives.visualization.directive('progressBar', function($filter) {
     if (attrs.progressBarClass) {
       scope.$watch(attrs.progressBarClass, function(val) {
         element.children('.progress-bar').removeClass(lastClass);
-        lastClass = $filter('statusFilter')(val);
+        var palette = $window.user.Settings.alternate_palette;
+        lastClass = $filter('statusFilter')(val, palette);
         element.children('.progress-bar').addClass(lastClass);
       });
     }

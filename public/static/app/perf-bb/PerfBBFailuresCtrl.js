@@ -80,7 +80,7 @@ mciModule.controller('PerfBBFailuresCtrl', function(
       field: 'status_details.type',
       cellClass: 'task-status-cell',
       cellTemplate:
-        '<div class="ui-grid-cell-contents {{row.entity | statusFilter}}">' +
+        '<div class="ui-grid-cell-contents {{statusFilter(row.entity, false)}}">' +
           '{{row.entity | statusLabel}}' +
         '</div>',
       width: 160,

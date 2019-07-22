@@ -6,6 +6,7 @@
 @started_grey:#ccc;
 @success_green: #4AC948;
 @fail_red: #FF4040;
+@fail_alternate: #0099FF;
 @cell_size:20px;
 @rowheader_width:10px;
 @header_height:60px;
@@ -212,6 +213,9 @@ ul.tooltip-tasks{
 }
 .cell.failed {
     background-color: @fail_red;
+}
+.cell.failed-alternate {
+    background-color: @fail_alternate;
 }
 .cell.system-failed {
     background-color: @system-failure;

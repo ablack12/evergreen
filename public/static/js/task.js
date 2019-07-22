@@ -261,6 +261,7 @@ mciModule.controller('TaskHistoryDrawerCtrl', function($scope, $window, $locatio
         $scope.taskHost = $window.taskHost;
         $scope.jiraHost = $window.jiraHost;
         $scope.isAdmin = $window.isAdmin;
+        $scope.useAlternatePalette = $window.palette;
 
         $scope.triggers = [
           {
@@ -611,10 +612,14 @@ mciModule.controller('TaskHistoryDrawerCtrl', function($scope, $window, $locatio
 
               successTimeTaken = $filter('nanoToSeconds')(successTimeTaken)
               failureTimeTaken = $filter('nanoToSeconds')(failureTimeTaken)
+              var failedClass = 'progress-bar progress-bar-danger';
+              if (scope.useAlternatePalette) {
+                failedClass += '-alternate';
+              }
               var successTitle = numSuccess + ' test' + (numSuccess == 1 ? '' : 's') + ' succeeded in ' + $filter('stringifyNanoseconds')(successTimeTaken);
               var failedTitle = numFailed + ' test' + (numFailed == 1 ? '' : 's') + ' failed in ' + $filter('stringifyNanoseconds')(failureTimeTaken);
               element.html('<div class="progress-bar progress-bar-success" role="progressbar" style="width: ' + (numSuccess / testResults.length * 100) + '%" data-animation="" data-toggle="tooltip" title="' + successTitle + '"></div>' +
-              '<div class="progress-bar progress-bar-danger" role="progressbar" style="width: ' + (numFailed / testResults.length * 100) + '%"  data-animation="" data-toggle="tooltip" title="' + failedTitle + '"></div>')
+              '<div class="'+ failedClass + '" role="progressbar" style="width: ' + (numFailed / testResults.length * 100) + '%"  data-animation="" data-toggle="tooltip" title="' + failedTitle + '"></div>')
 
               $(element.children('*[data-toggle="tooltip"]')).each(function(i, el) {
                 $(el).tooltip();

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mongodb/grip"
+
 	"github.com/evergreen-ci/evergreen"
 	"github.com/evergreen-ci/evergreen/model/user"
 	"github.com/evergreen-ci/evergreen/util"
@@ -53,6 +55,15 @@ func MakeTemplateFuncs(fo TemplateFunctionOptions, superUsers []string) map[stri
 				return usr.Settings.Timezone
 			}
 			return "America/New_York"
+		},
+
+		"UseAlternatePalette": func(u gimlet.User) bool {
+			usr, ok := u.(*user.DBUser)
+			if ok && usr != nil {
+				grip.Debugf("UseAlternatePalette: %v", usr.Settings.AlternatePalette)
+				return usr.Settings.AlternatePalette
+			}
+			return false
 		},
 
 		// Trunc cuts off a string to be n characters long.

@@ -109,9 +109,9 @@ $(buildDir)/set-project-var:cmd/set-project-var/set-project-var.go
 set-var:$(buildDir)/set-var
 set-project-var:$(buildDir)/set-project-var
 set-smoke-vars:$(buildDir)/.load-smoke-data
-	@./bin/set-project-var -dbName mci_smoke -key aws_key -value $(AWS_KEY)
-	@./bin/set-project-var -dbName mci_smoke -key aws_secret -value $(AWS_SECRET)
-	@./bin/set-var -dbName mci_smoke -collection hosts -id localhost -key agent_revision -value $(currentHash)
+	@./bin/set-project-var -dbName mci -key aws_key -value $(AWS_KEY)
+	@./bin/set-project-var -dbName mci -key aws_secret -value $(AWS_SECRET)
+	@./bin/set-var -dbName mci -collection hosts -id localhost -key agent_revision -value $(currentHash)
 load-smoke-data:$(buildDir)/.load-smoke-data
 $(buildDir)/.load-smoke-data:$(buildDir)/load-smoke-data
 	./$<

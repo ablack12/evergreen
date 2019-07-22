@@ -20,8 +20,9 @@ mciModule.controller('BuildVariantHistoryController', function($scope, $http, $f
     $scope.buildResults[build._id] = [];
 
     for (var j = 0; j < build.tasks.length; ++j) {
+      var palette = $window.user.Settings.alternate_palette;
       $scope.buildResults[build._id].push({
-        "class": $filter('statusFilter')(build.tasks[j]),
+        "class": $filter('statusFilter')(build.tasks[j], palette),
         "tooltip": build.tasks[j].display_name + " - " + $filter('statusLabel')(build.tasks[j]),
         "link": '/task/' + build.tasks[j].id
       });

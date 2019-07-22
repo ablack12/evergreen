@@ -1,6 +1,6 @@
 database:
   url: "mongodb://localhost:27017"
-  db: "mci_smoke"
+  db: "mci"
   write_concern:
     wmode: majority
 

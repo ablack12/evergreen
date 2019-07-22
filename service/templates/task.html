@@ -10,7 +10,7 @@ window.isAdmin = {{.IsProjectAdmin}};
 window.user = {{.User}};
 </script>
 <script type="text/javascript" src="{{Static "js" "subscriptions.js"}}?hash={{ BuildRevision }}"></script>
-<script type="text/javascript" src="{{Static "js" "task.js"}}?hash={{ BuildRevision }}"></script>
+<script type="text/javascript" src="{{Static "js" "task.js"}}?hash=1"></script>
 <script type="text/javascript" src="/static/app/perf-bb/constants.js?hash={{ BuildRevision }}"></script>
 <script type="text/javascript" src="/static/app/perf-bb/ChangePointsService.js?hash={{ BuildRevision }}"></script>
 <script type="text/javascript" src="/static/app/common/WhitelistDataService.js?hash={{ BuildRevision }}"></script>
@@ -20,6 +20,7 @@ window.user = {{.User}};
 {{end}}
 <script type="text/javascript">
 var userTz = {{GetTimezone $.User}}
+var palette = {{UseAlternatePalette $.User}}
 var jiraHost = {{.JiraHost}}
 {{if .User}}
 var have_user = true
@@ -109,7 +110,7 @@ Evergreen - {{Trunc .Task.Revision 10}} / {{.Task.BuildVariantDisplay}} / {{.Tas
           <div class="col-lg-7">
             <header class="clearfix">
               <h1 class="one-liner" id="task-title">
-                <span class="label status-label" ng-class="task | statusFilter">[[task | statusLabel]]</span>
+                <span class="label status-label" ng-class="task | statusFilter:{palette}">[[task | statusLabel]]</span>
                 [[task.display_name]] <span class="text-muted">on</span> [[task.build_variant_display]]
               </h1>
 
@@ -324,7 +325,7 @@ Evergreen - {{Trunc .Task.Revision 10}} / {{.Task.BuildVariantDisplay}} / {{.Tas
                           <span class="label label-primary" ng-show="dependency.required == '*'"> must finish </span>
                         </td>
                         <td class="dep-task-status">
-                          <span class="label [[dependency | statusFilter]]">[[dependency | statusLabel]]</span>
+                          <span class="label [[dependency | statusFilter:{palette}]]">[[dependency | statusLabel]]</span>
                         </td>
                       </tr>
                     </tbody>

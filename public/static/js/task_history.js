@@ -473,7 +473,8 @@ $scope.getGridClass = function(cell) {
       return 'undispatched ' + (cell.activated ? 'active' : 'inactive')
     }
     cell.task_end_details = cell.details;
-    return $filter('statusFilter')(cell);
+    var palette = $window.user.Settings.alternate_palette;
+    return $filter('statusFilter')(cell, palette);
   }
   return 'skipped';
 };

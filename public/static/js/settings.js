@@ -43,8 +43,9 @@ mciModule.controller('SettingsCtrl', ['$scope', '$http', '$window', 'notificatio
   ];
 
   $scope.user_tz = $window.user_tz;
+  $scope.alternate_palette = $window.alternate_palette;
   $scope.new_tz = $scope.user_tz || "America/New_York";
-  $scope.github_user = $window.github_user
+  $scope.github_user = $window.github_user;
   $scope.new_waterfall = $window.new_waterfall;
   $scope.userConf = $window.userConf;
   $scope.binaries = $window.binaries;

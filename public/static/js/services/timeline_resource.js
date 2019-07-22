@@ -45,10 +45,11 @@ mciModule.factory('$timeline', function($http, $filter) {
         _.each(version.Builds, function(build) {
           build.taskResults = [];
           _.each(build.Build.tasks, function(task) {
+            var palette = $window.user.Settings.alternate_palette;
             build.taskResults.push({
               link: '/task/' + task.id,
               tooltip: task.display_name,
-              'class': $filter('statusFilter')(task),
+              'class': $filter('statusFilter')(task, palette),
             });
           });
         });

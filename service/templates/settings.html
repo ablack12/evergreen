@@ -8,6 +8,7 @@
   var github_user = {{ .GithubUser }};
   var github_uid = {{ .GithubUID }};
   var userApiKey = {{.User.APIKey}};
+  var alternate_palette = {{.Data.AlternatePalette }};
   var userConf = {{.Config}};
   var binaries = {{.Binaries}};
   var auth_is_ldap = {{.AuthIsLDAP}};
@@ -92,7 +93,7 @@ ui_server_host: "[[userConf.ui_server_host]]"</pre>
 
             <md-input-container class="control" style="width:250px; margin-left:50px;">
                 <md-checkbox ng-model="alternate_palette">
-                  Switch to Alternate Palette
+                  Use Alternate Palette
             </md-checkbox>
             </md-input-container>
             <div class="form-group">

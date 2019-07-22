@@ -743,7 +743,7 @@ mciModule.factory('DrawPerfTrendChart', function (
 
     redrawTooltip()
 
-    function updateToolitp(levels) {
+    function updateTooltip(levels) {
       var focusedPoints = focusG.selectAll('circle')
         .data(levels)
 
@@ -1105,7 +1105,7 @@ mciModule.factory('DrawPerfTrendChart', function (
       focusG.attr('transform', d3Translate(x, 0))
 
       // Add/Remove tooltip items (some data samples may not contain all thread levels)
-      updateToolitp(threadMode == MAXONLY
+      updateTooltip(threadMode == MAXONLY
         ? activeLevels
         : threadLevelsForSample(item, activeLevels)
       )
