@@ -57,7 +57,7 @@ mciModule.controller('SpawnedHostsCtrl', ['$scope','$window', '$timeout', 'mciSp
                   } else {
                       var uptime = moment().diff(host.creation_time, 'seconds');
                       host.uptime = moment.duration(uptime, 'seconds').humanize();
-                      if(+new Date(host.expiration_time) > +new Date("0001-01-01T00:00:00Z")){
+                      if(+new Date(host.expiration_time) > new Date("0001-01-01T00:00:00Z")){
                           if (host.no_expiration) {
                               host.expires_in = "never";
                               host.original_expiration = new Date();
