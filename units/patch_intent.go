@@ -357,8 +357,7 @@ func (j *patchIntentProcessor) buildCliPatchDoc(ctx context.Context, patchDoc *p
 	}
 	patchDoc.Patches[0].ModuleName = ""
 
-	// TODO: refactor this when migration is done. Populate both summary and
-	//  CommitSummary for commit queue patches for backwards compatibility.
+	// TODO: refactor this when migration is done. Don't run this if evergreen.CommitQueueAlias is true
 	patchBytes, err := ioutil.ReadAll(reader)
 	if err != nil {
 		return errors.Wrap(err, "error parsing patch")
@@ -384,14 +383,14 @@ func (j *patchIntentProcessor) buildCliPatchDoc(ctx context.Context, patchDoc *p
 				"patch_doc_id": patchDoc.Patches[0].PatchSet.PatchFileId,
 			}))
 		}
-		patchDoc.Patches[0].PatchSet.CommitSummary = summaries
+		patchDoc.Patches[0].PatchSet.Summary = summaries
 	}
 
 	return nil
 }
 
 // if commit queue then mbox format, organize summaries by commit
-func GetPatchSummariesByCommit(reader io.Reader) ([]patch.CommitSummary, error) {
+func GetPatchSummariesByCommit(reader io.Reader) ([]patch.Summary, error) {
 	stream, err := mbox.CreateMboxStream(reader)
 	if err != nil {
 		if err == io.EOF {
@@ -402,7 +401,7 @@ func GetPatchSummariesByCommit(reader io.Reader) ([]patch.CommitSummary, error) 
 	if stream == nil {
 		return nil, errors.New("mbox stream is nil")
 	}
-	result := []patch.CommitSummary{}
+	result := []patch.Summary{}
 
 	// iterate through patches
 	for err == nil {
@@ -415,10 +414,10 @@ func GetPatchSummariesByCommit(reader io.Reader) ([]patch.CommitSummary, error) 
 			return nil, errors.Wrap(err, "error reading message")
 		}
 
-		commitSummary := patch.CommitSummary{}
+		var description string
 		// store only the commit hash and first author
 		if subject := msg.Headers()["Subject"]; len(subject) > 0 {
-			commitSummary.Commit = subject[0]
+			description = strings.TrimSpace(subject[0])
 		}
 
 		reader := msg.BodyReader()
@@ -430,10 +429,12 @@ func GetPatchSummariesByCommit(reader io.Reader) ([]patch.CommitSummary, error) 
 				if err == io.EOF { // finished reading body of this patch
 					summaries, err := thirdparty.GetPatchSummaries(string(buffer))
 					if err != nil {
-						return nil, errors.Wrapf(err, "error getting patch summaries for commit '%s'", commitSummary.Commit)
+						return nil, errors.Wrapf(err, "error getting patch summaries for commit '%s'", description)
 					}
-					commitSummary.Summary = summaries
-					result = append(result, commitSummary)
+					for i := range summaries {
+						summaries[i].Description = description
+					}
+					result = append(result, summaries...)
 					break
 				}
 				return nil, errors.Wrap(err, "error reading body")

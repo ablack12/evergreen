@@ -580,15 +580,12 @@ index ce0542e91..718dd8099 100644
 	reader := ioutil.NopCloser(strings.NewReader(patchData))
 	defer assert.NoError(t, reader.Close())
 
-	summariesByCommit, err := GetPatchSummariesByCommit(reader)
+	summaries, err := GetPatchSummariesByCommit(reader)
 	assert.NoError(t, err)
-	require.Len(t, summariesByCommit, 2)
-	assert.Equal(t, "EVG-6799 remove one commit validation", summariesByCommit[0].Commit)
-	assert.Equal(t, "temp", summariesByCommit[1].Commit)
+	require.Len(t, summaries, 2)
+	assert.Equal(t, "EVG-6799 remove one commit validation", summaries[0].Description)
+	assert.Equal(t, "temp", summaries[1].Description)
 
-	require.Len(t, summariesByCommit[0].Summary, 1)
-	assert.Equal(t, "operations/commit_queue.go", summariesByCommit[0].Summary[0].Name)
-	require.Len(t, summariesByCommit[1].Summary, 1)
-
-	assert.Equal(t, "units/commit_queue.go", summariesByCommit[1].Summary[0].Name)
+	assert.Equal(t, "operations/commit_queue.go", summaries[0].Name)
+	assert.Equal(t, "units/commit_queue.go", summaries[1].Name)
 }

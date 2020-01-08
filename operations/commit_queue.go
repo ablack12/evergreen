@@ -405,6 +405,7 @@ func (p *moduleParams) addModule(ac *legacyClient, rc *legacyClient) error {
 		if err != nil {
 			return errors.Wrap(err, "can't get commit messages")
 		}
+
 		p.message = message
 	}
 

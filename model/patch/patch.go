@@ -80,22 +80,17 @@ type ModulePatch struct {
 
 // PatchSet stores information about the actual patch
 type PatchSet struct {
-	Patch         string          `bson:"patch,omitempty"`
-	PatchFileId   string          `bson:"patch_file_id,omitempty"`
-	Summary       []Summary       `bson:"summary"`
-	CommitSummary []CommitSummary `bson:"commit_summary"`
-}
-
-type CommitSummary struct {
-	Commit  string    `bson:"commit"`
-	Summary []Summary `bson:"summary"`
+	Patch       string    `bson:"patch,omitempty"`
+	PatchFileId string    `bson:"patch_file_id,omitempty"`
+	Summary     []Summary `bson:"summary"`
 }
 
 // Summary stores summary patch information
 type Summary struct {
-	Name      string `bson:"filename"`
-	Additions int    `bson:"additions"`
-	Deletions int    `bson:"deletions"`
+	Name        string `bson:"filename"`
+	Additions   int    `bson:"additions"`
+	Deletions   int    `bson:"deletions"`
+	Description string `bson:"description,omitempty"`
 }
 
 // SetDescription sets a patch's description in the database
