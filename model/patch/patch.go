@@ -87,7 +87,6 @@ type PatchSet struct {
 }
 
 type CommitSummary struct {
-	Author  string    `bson:"author"`
 	Commit  string    `bson:"commit"`
 	Summary []Summary `bson:"summary"`
 }

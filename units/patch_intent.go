@@ -417,12 +417,10 @@ func GetPatchSummariesByCommit(reader io.Reader) ([]patch.CommitSummary, error) 
 
 		commitSummary := patch.CommitSummary{}
 		// store only the commit hash and first author
-		if sender := strings.Split(msg.Sender(), " "); len(sender) > 0 {
-			commitSummary.Commit = sender[0]
+		if subject := msg.Headers()["Subject"]; len(subject) > 0 {
+			commitSummary.Commit = subject[0]
 		}
-		if authors := msg.Headers()["From"]; len(authors) > 0 {
-			commitSummary.Author = authors[0]
-		}
+
 		reader := msg.BodyReader()
 		// iterate through patch body
 		for {

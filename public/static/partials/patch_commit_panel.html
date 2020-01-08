@@ -38,7 +38,7 @@
           </span>
         </div>
 
-        <table class="table table-new" ng-init="patchNum=$index">
+        <table class="table table-new" ng-init="patchNum=$index" ng-hide="patch.PatchSet.CommitSummary.length > 0">
           <thead>
             <tr>
               <th class="col-lg-2">Additions</th>
@@ -54,6 +54,29 @@
                 <a ng-href="/filediff/[[patchinfo.Patch.Id]]?file_name=[[file.Name | encodeUri]]&patch_number=[[patchNum]]">[[file.Name]]</a>
               </td>
             </tr>
+          </tbody>
+        </table>
+
+        <table class="table table-new" ng-init="patchNum=$index" ng-show="patch.PatchSet.CommitSummary.length > 0">
+          <thead>
+          <tr>
+            <th class="col-lg-2">Commit</th>
+            <th class="col-lg-2">Additions</th>
+            <th class="col-lg-2">Deletions</th>
+            <th class="col-lg-8">File</th>
+          </tr>
+          </thead>
+          <tbody>
+          <tr ng-repeat="commit in patch.PatchSet.CommitSummary">
+            <tr ng-repeat="file in commit.Summary">
+              <td class="col-lg-4">[[commit.Commit]]</td>
+              <td class="col-lg-4 additions">+[[file.Additions]]</td>
+              <td class="col-lg-4 deletions">-[[file.Deletions]]</td>
+              <td class="col-lg-4">
+                <a ng-href="/filediff/[[patchinfo.Patch.Id]]?file_name=[[file.Name | encodeUri]]&patch_number=[[patchNum]]">[[file.Name]]</a>
+              </td>
+            </tr>
+          </tr>
           </tbody>
         </table>
       </div>
