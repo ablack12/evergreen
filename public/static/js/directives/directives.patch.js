@@ -33,6 +33,18 @@ directives.patch.directive('patchCommitPanel', function() {
       scope.timezone = attrs.timezone;
       scope.base = attrs.base;
       scope.baselink = attrs.baselink;
+
+      scope.formatByCommit = function(summaries) {
+        var byCommits = [];
+        _.each(summaries, function(summary) {
+            if (byCommits[summary.Description] !== undefined) {
+              byCommits[summary.Description].push(summary);
+            } else {
+              byCommits[summary.Description] = [summary];
+            }
+        });
+        return byCommits
+      }
     }
   };
 });
