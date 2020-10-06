@@ -362,6 +362,16 @@ func (pbv *parserBV) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
+func (pbv *parserBV) getTasksToActivate() []string {
+	res := []string{}
+	for _, t := range pbv.Tasks {
+		if t.BatchTime == nil && t.CronBatchTime == "" {
+			res = append(res, t.Name)
+		}
+	}
+	return res
+}
+
 // parserBVTaskUnit is a helper type storing intermediary variant task configurations.
 type parserBVTaskUnit struct {
 	Name             string             `yaml:"name,omitempty" bson:"name,omitempty"`
@@ -376,6 +386,13 @@ type parserBVTaskUnit struct {
 	Distros          parserStringSlice  `yaml:"distros,omitempty" bson:"distros,omitempty"`
 	RunOn            parserStringSlice  `yaml:"run_on,omitempty" bson:"run_on,omitempty"` // Alias for "Distros" TODO: deprecate Distros
 	CommitQueueMerge bool               `yaml:"commit_queue_merge,omitempty" bson:"commit_queue_merge,omitempty"`
+	// Use a *int for 2 possible states
+	// nil - not overriding the project setting
+	// non-nil - overriding the project setting with this BatchTime
+	BatchTime *int `yaml:"batchtime,omitempty" bson:"batchtime,omitempty"`
+	// If CronBatchTime is not empty, then override the project settings with cron syntax,
+	// with BatchTime and CronBatchTime being mutually exclusive.
+	CronBatchTime string `yaml:"cron,omitempty" bson:"cron,omitempty"`
 }
 
 // UnmarshalYAML allows the YAML parser to read both a single selector string or
@@ -884,6 +901,8 @@ func evaluateBVTasks(tse *taskSelectorEvaluator, tgse *tagSelectorEvaluator, vse
 				Stepback:         pt.Stepback,
 				Distros:          pt.Distros,
 				CommitQueueMerge: pt.CommitQueueMerge,
+				CronBatchTime:    pt.CronBatchTime,
+				BatchTime:        pt.BatchTime,
 			}
 
 			// Task-level dependencies in the variant override variant-level dependencies

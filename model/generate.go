@@ -208,9 +208,9 @@ func (g *GeneratedProject) saveNewBuildsAndTasks(ctx context.Context, v *Version
 		}
 	}
 	// for patches and versions triggered by users, activate all builds. Otherwise activate ones that are not setting batchtime
-	var variantsToActivate []string
+	var toActivate tasksAndVariantsToActivate
 	if !evergreen.IsPatchRequester(v.Requester) && evergreen.ShouldConsiderBatchtime(v.Requester) {
-		variantsToActivate = g.findVariantsToActivate()
+		toActivate = g.findVariantsToActivate()
 	}
 	newTVPairs := TaskVariantPairs{}
 	for _, bv := range g.BuildVariants {
@@ -258,12 +258,12 @@ func (g *GeneratedProject) saveNewBuildsAndTasks(ctx context.Context, v *Version
 		syncAtEndOpts = patchDoc.SyncAtEndOpts
 	}
 
-	tasksInExistingBuilds, err := AddNewTasks(ctx, true, v, p, newTVPairsForExistingVariants, syncAtEndOpts, g.TaskID)
+	tasksInExistingBuilds, err := AddNewTasks(ctx, v, p, newTVPairsForExistingVariants, syncAtEndOpts, g.TaskID)
 	if err != nil {
 		return errors.Wrap(err, "errors adding new tasks")
 	}
 
-	_, tasksInNewBuilds, err := AddNewBuilds(ctx, variantsToActivate, v, p, newTVPairsForNewVariants, syncAtEndOpts, g.TaskID)
+	_, tasksInNewBuilds, err := AddNewBuilds(ctx, toActivate, v, p, newTVPairsForNewVariants, syncAtEndOpts, g.TaskID)
 	if err != nil {
 		return errors.Wrap(err, "errors adding new builds")
 	}
@@ -275,14 +275,22 @@ func (g *GeneratedProject) saveNewBuildsAndTasks(ctx context.Context, v *Version
 	return nil
 }
 
-func (g *GeneratedProject) findVariantsToActivate() []string {
-	var toActivate []string
+type tasksAndVariantsToActivate struct {
+	variants []string
+	tasks    map[string][]string // map of tasks that can be activated for the build
+}
+
+func (g *GeneratedProject) findTasksAndVariantsToActivate() tasksAndVariantsToActivate {
+	toActivate := tasksAndVariantsToActivate{variants: []string{}, tasks: map[string][]string{}}
 	for _, bv := range g.BuildVariants {
+		tasksToActivate := []string{}
 		if bv.BatchTime == nil && bv.CronBatchTime == "" {
-			if toActivate == nil {
-				toActivate = []string{}
+			toActivate.variants = append(toActivate.variants, bv.name())
+		}
+		for _, t := range bv.Tasks {
+			if t.BatchTime == nil && t.CronBatchTime == "" {
+
 			}
-			toActivate = append(toActivate, bv.name())
 		}
 	}
 	return toActivate

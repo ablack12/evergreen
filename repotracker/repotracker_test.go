@@ -263,13 +263,17 @@ func TestBatchTimes(t *testing.T) {
 			BuildVariants: []model.VersionBuildStatus{
 				{
 					BuildVariant: "bv1",
-					Activated:    true,
-					ActivateAt:   time.Now(),
+					ActivationStatus: model.ActivationStatus{
+						Activated:  true,
+						ActivateAt: time.Now(),
+					},
 				},
 				{
 					BuildVariant: "bv2",
-					Activated:    true,
-					ActivateAt:   time.Now(),
+					ActivationStatus: model.ActivationStatus{
+						Activated:  true,
+						ActivateAt: time.Now(),
+					},
 				},
 			},
 			RevisionOrderNumber: 0,
@@ -305,7 +309,7 @@ func TestBatchTimes(t *testing.T) {
 			So(v, ShouldNotBeNil)
 			So(err, ShouldBeNil)
 			So(len(v.BuildVariants), ShouldEqual, 2)
-			So(model.ActivateElapsedBuilds(v), ShouldBeNil)
+			So(model.ActivateElapsedBuildsAndTasks(v), ShouldBeNil)
 			So(v.BuildVariants[0].Activated, ShouldBeFalse)
 			So(v.BuildVariants[1].Activated, ShouldBeFalse)
 		})
@@ -329,7 +333,7 @@ func TestBatchTimes(t *testing.T) {
 			version, err := model.VersionFindOne(model.VersionByMostRecentSystemRequester("testproject"))
 			So(version, ShouldNotBeNil)
 			So(err, ShouldBeNil)
-			So(model.ActivateElapsedBuilds(version), ShouldBeNil)
+			So(model.ActivateElapsedBuildsAndTasks(version), ShouldBeNil)
 			bv1, found := findStatus(version, "bv1")
 			So(found, ShouldBeTrue)
 			So(bv1.Activated, ShouldBeTrue)
@@ -364,7 +368,7 @@ func TestBatchTimes(t *testing.T) {
 			version, err := model.VersionFindOne(model.VersionByMostRecentSystemRequester("testproject"))
 			So(version, ShouldNotBeNil)
 			So(err, ShouldBeNil)
-			So(model.ActivateElapsedBuilds(version), ShouldBeNil)
+			So(model.ActivateElapsedBuildsAndTasks(version), ShouldBeNil)
 			bv1, found := findStatus(version, "bv1")
 			So(found, ShouldBeTrue)
 			So(bv1.Activated, ShouldBeFalse)
@@ -397,7 +401,7 @@ func TestBatchTimes(t *testing.T) {
 			version, err := model.VersionFindOne(model.VersionByMostRecentSystemRequester("testproject"))
 			So(err, ShouldBeNil)
 			So(version, ShouldNotBeNil)
-			So(model.ActivateElapsedBuilds(version), ShouldBeNil)
+			So(model.ActivateElapsedBuildsAndTasks(version), ShouldBeNil)
 			bv1, found := findStatus(version, "bv1")
 			So(found, ShouldBeTrue)
 			So(bv1.Activated, ShouldBeTrue)
@@ -419,8 +423,10 @@ func TestBatchTimes(t *testing.T) {
 			BuildVariants: []model.VersionBuildStatus{
 				{
 					BuildVariant: "bv1",
-					Activated:    true,
-					ActivateAt:   time.Now(),
+					ActivationStatus: model.ActivationStatus{
+						Activated:  true,
+						ActivateAt: time.Now(),
+					},
 				},
 				// "bv2" will be added in a later revision
 			},
@@ -453,7 +459,7 @@ func TestBatchTimes(t *testing.T) {
 		So(version, ShouldNotBeNil)
 
 		Convey("the new variant should activate immediately", func() {
-			So(model.ActivateElapsedBuilds(version), ShouldBeNil)
+			So(model.ActivateElapsedBuildsAndTasks(version), ShouldBeNil)
 			bv1, found := findStatus(version, "bv1")
 			So(found, ShouldBeTrue)
 			So(bv1.Activated, ShouldBeTrue)
