@@ -311,7 +311,7 @@ func (p *Patch) SetVariantsTasks(variantsTasks []VariantTasks) error {
 	)
 }
 
-// AddBuildVariants adds more buildvarints to a patch document.
+// AddBuildVariants adds more buildvariants to a patch document.
 // This is meant to be used after initial patch creation.
 func (p *Patch) AddBuildVariants(bvs []string) error {
 	change := adb.Change{

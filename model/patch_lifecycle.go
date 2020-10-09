@@ -92,14 +92,28 @@ func ValidateTVPairs(p *Project, in []TVPair) error {
 // do not exist yet out of the set of pairs. No tasks are added for builds which already exist
 // (see AddNewTasksForPatch).
 func AddNewBuildsForPatch(ctx context.Context, p *patch.Patch, patchVersion *Version, project *Project, tasks TaskVariantPairs) error {
-	_, _, err := AddNewBuilds(ctx, nil, patchVersion, project, tasks, p.SyncAtEndOpts, "")
+	pRef, err := FindOneProjectRef(project.Identifier)
+	if err != nil {
+		return errors.Wrap(err, "unable to find project ref")
+	}
+	if pRef == nil {
+		return errors.Errorf("project '%s' not found", project.Identifier)
+	}
+	_, _, err = addNewBuilds(ctx, nil, patchVersion, project, pRef, tasks, p.SyncAtEndOpts, "")
 	return errors.Wrap(err, "can't add new builds")
 }
 
 // Given a patch version and set of variant/task pairs, creates any tasks that don't exist yet,
 // within the set of already existing builds.
 func AddNewTasksForPatch(ctx context.Context, p *patch.Patch, patchVersion *Version, project *Project, pairs TaskVariantPairs) error {
-	_, err := AddNewTasks(ctx, patchVersion, project, pairs, p.SyncAtEndOpts, "")
+	pRef, err := FindOneProjectRef(project.Identifier)
+	if err != nil {
+		return errors.Wrap(err, "unable to find project ref")
+	}
+	if pRef == nil {
+		return errors.Errorf("project '%s' not found", project.Identifier)
+	}
+	_, err = addNewTasks(ctx, nil, patchVersion, project, pRef, pairs, p.SyncAtEndOpts, "")
 	return errors.Wrap(err, "can't add new tasks")
 }
 

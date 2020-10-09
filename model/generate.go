@@ -208,9 +208,9 @@ func (g *GeneratedProject) saveNewBuildsAndTasks(ctx context.Context, v *Version
 		}
 	}
 	// for patches and versions triggered by users, activate all builds. Otherwise activate ones that are not setting batchtime
-	var variantsToActivate []string
+	var toActivate tasksAndVariantsToActivate
 	if !evergreen.IsPatchRequester(v.Requester) && evergreen.ShouldConsiderBatchtime(v.Requester) {
-		variantsToActivate = g.findVariantsToActivate()
+		toActivate = g.findTasksAndVariantsToActivate()
 	}
 	newTVPairs := TaskVariantPairs{}
 	for _, bv := range g.BuildVariants {
@@ -257,13 +257,20 @@ func (g *GeneratedProject) saveNewBuildsAndTasks(ctx context.Context, v *Version
 		}
 		syncAtEndOpts = patchDoc.SyncAtEndOpts
 	}
+	projectRef, err := FindOneProjectRef(p.Identifier)
+	if err != nil {
+		return errors.Wrap(err, "unable to find project ref")
+	}
+	if projectRef == nil {
+		return errors.Errorf("project '%s' not found", p.Identifier)
+	}
 
-	tasksInExistingBuilds, err := AddNewTasks(ctx, v, p, newTVPairsForExistingVariants, syncAtEndOpts, g.TaskID)
+	tasksInExistingBuilds, err := addNewTasks(ctx, toActivate, v, p, projectRef, newTVPairsForExistingVariants, syncAtEndOpts, g.TaskID)
 	if err != nil {
 		return errors.Wrap(err, "errors adding new tasks")
 	}
 
-	_, tasksInNewBuilds, err := AddNewBuilds(ctx, variantsToActivate, v, p, newTVPairsForNewVariants, syncAtEndOpts, g.TaskID)
+	_, tasksInNewBuilds, err := addNewBuilds(ctx, toActivate, v, p, projectRef, newTVPairsForNewVariants, syncAtEndOpts, g.TaskID)
 	if err != nil {
 		return errors.Wrap(err, "errors adding new builds")
 	}
@@ -275,15 +282,24 @@ func (g *GeneratedProject) saveNewBuildsAndTasks(ctx context.Context, v *Version
 	return nil
 }
 
-func (g *GeneratedProject) findVariantsToActivate() []string {
-	var toActivate []string
+type tasksAndVariantsToActivate map[string][]string
+
+// if the variant has batchtime, then we don't want to activate regular OR batchtime tasks, so don't include in map. // TODO: is this assumption true?
+// if the variant doesn't have batchtime, then we only want to activate regular tasks.
+func (g *GeneratedProject) findTasksAndVariantsToActivate() tasksAndVariantsToActivate {
+	toActivate := map[string][]string{}
 	for _, bv := range g.BuildVariants {
+		var tasksToActivate []string
 		if bv.BatchTime == nil && bv.CronBatchTime == "" {
-			if toActivate == nil {
-				toActivate = []string{}
+			tasksToActivate = []string{}
+			for _, bvt := range bv.Tasks {
+				if bvt.BatchTime == nil && bv.CronBatchTime == "" {
+					tasksToActivate = append(tasksToActivate, bvt.Name)
+				}
 			}
-			toActivate = append(toActivate, bv.name())
+			toActivate[bv.name()] = tasksToActivate
 		}
+
 	}
 	return toActivate
 }

@@ -629,9 +629,11 @@ func RefreshTasksCache(buildId string) error {
 	return errors.WithStack(build.SetTasksCache(buildId, cache))
 }
 
-// AddTasksToBuild creates/activates the tasks for the given build of a project
-func AddTasksToBuild(ctx context.Context, b *build.Build, project *Project, v *Version, taskNames []string,
-	displayNames []string, generatedBy string, tasksInBuild []task.Task, syncAtEndOpts patch.SyncAtEndOptions, distroAliases map[string][]string) (*build.Build, task.Tasks, error) {
+// addTasksToBuild creates/activates the tasks for the given build of a project
+func addTasksToBuild(ctx context.Context, b *build.Build, project *Project, pRef *ProjectRef, v *Version,
+	taskNames []string, displayNames []string, tasksToActivate []string, generatedBy string, tasksInBuild []task.Task,
+	syncAtEndOpts patch.SyncAtEndOptions, distroAliases map[string][]string) (*build.Build, task.Tasks, error) {
+
 	// find the build variant for this project/build
 	buildVariant := project.FindBuildVariant(b.BuildVariant)
 	if buildVariant == nil {
@@ -647,7 +649,7 @@ func AddTasksToBuild(ctx context.Context, b *build.Build, project *Project, v *V
 		return nil, nil, errors.Wrapf(err, "can't get create time for tasks in version '%s'", v.Id)
 	}
 
-	tasks, err := createTasksForBuild(project, buildVariant, b, v, taskIds, taskNames, displayNames, nil,
+	tasks, err := createTasksForBuild(project, buildVariant, b, v, taskIds, taskNames, displayNames, tasksToActivate,
 		generatedBy, tasksInBuild, syncAtEndOpts, distroAliases, createTime)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "error creating tasks for build '%s'", b.Id)
@@ -662,6 +664,39 @@ func AddTasksToBuild(ctx context.Context, b *build.Build, project *Project, v *V
 		return nil, nil, errors.Wrapf(err, "error updating task cache for '%s'", b.Id)
 	}
 
+	// add any new batchtime tasks
+	batchTimeTasks := []BatchTimeTaskStatus{}
+	for _, t := range tasks {
+		if !t.Activated {
+			activateTaskAt, err := pRef.GetActivationTimeForTask(project.FindTaskForVariant(t.DisplayName, b.BuildVariant))
+			grip.Error(message.WrapError(err, message.Fields{
+				"message": "unable to get activation time for task",
+				"variant": b.BuildVariant,
+				"task":    t.DisplayName,
+				"version": v.Id,
+			}))
+			batchTimeTasks = append(batchTimeTasks, BatchTimeTaskStatus{
+				TaskName: t.DisplayName,
+				TaskId:   t.Id,
+				ActivationStatus: ActivationStatus{
+					ActivateAt: activateTaskAt,
+				},
+			})
+		}
+	}
+
+	for i, status := range v.BuildVariants {
+		if status.BuildVariant != b.BuildVariant {
+			continue
+		}
+		v.BuildVariants[i].BatchTimeTasks = append(v.BuildVariants[i].BatchTimeTasks, batchTimeTasks...)
+		grip.Error(message.WrapError(v.UpdateBuildVariants(), message.Fields{
+			"message":       "unable to add unactivated batchtime tasks",
+			"variant":       b.BuildVariant,
+			"version":       v.Id,
+			"task_statuses": batchTimeTasks,
+		}))
+	}
 	return b, tasks, nil
 }
 
@@ -869,7 +904,7 @@ func createTasksForBuild(project *Project, buildVariant *BuildVariant, b *build.
 	taskMap := make(map[string]*task.Task)
 	for _, t := range tasksToCreate {
 		id := execTable.GetId(b.BuildVariant, t.Name)
-		activateTask := len(tasksToActivate) == 0 || utility.StringSliceContains(tasksToActivate, t.Name)
+		activateTask := tasksToActivate == nil || utility.StringSliceContains(tasksToActivate, t.Name)
 		newTask, err := createOneTask(id, t, project, buildVariant, b, v, distroAliases, createTime, activateTask)
 		if err != nil {
 			return nil, errors.Wrapf(err, "Failed to create task %s", id)
@@ -1387,15 +1422,9 @@ func sortLayer(layer []task.Task, idToDisplayName map[string]string) []task.Task
 // do not exist yet out of the set of pairs. No tasks are added for builds which already exist
 // (see AddNewTasksForPatch). activatedVariants is a list of variant names to activate, null will
 // activate all variants whereas an empty array will activate none
-func AddNewBuilds(ctx context.Context, activatedVariants []string, v *Version, p *Project, tasks TaskVariantPairs, syncAtEndOpts patch.SyncAtEndOptions, generatedBy string) ([]string, []string, error) {
+func addNewBuilds(ctx context.Context, toActivate tasksAndVariantsToActivate, v *Version, p *Project, pRef *ProjectRef,
+	tasks TaskVariantPairs, syncAtEndOpts patch.SyncAtEndOptions, generatedBy string) ([]string, []string, error) {
 	taskIds := NewTaskIdTable(p, v, "", "")
-	projectRef, err := FindOneProjectRef(p.Identifier)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "unable to find project ref")
-	}
-	if projectRef == nil {
-		return nil, nil, errors.Errorf("project %s not found", p.Identifier)
-	}
 	newBuildIds := make([]string, 0)
 	newTaskIds := make([]string, 0)
 	newBuildStatuses := make([]VersionBuildStatus, 0)
@@ -1422,18 +1451,23 @@ func AddNewBuilds(ctx context.Context, activatedVariants []string, v *Version, p
 		// Extract the unique set of task names for the variant we're about to create
 		taskNames := tasks.ExecTasks.TaskNames(pair.Variant)
 		displayNames := tasks.DisplayTasks.TaskNames(pair.Variant)
-		activateVariant := len(activatedVariants) == 0 || utility.StringSliceContains(activatedVariants, pair.Variant)
+		activateVariant := true
+		var tasksToActivate []string
+		if toActivate != nil { // if details are given, then only activate if the variant is specified
+			tasksToActivate, activateVariant = toActivate[pair.Variant]
+		}
 		buildArgs := BuildCreateArgs{
-			Project:        *p,
-			Version:        *v,
-			TaskIDs:        taskIds,
-			BuildName:      pair.Variant,
-			ActivateBuild:  activateVariant,
-			TaskNames:      taskNames,
-			DisplayNames:   displayNames,
-			GeneratedBy:    generatedBy,
-			TaskCreateTime: createTime,
-			SyncAtEndOpts:  syncAtEndOpts,
+			Project:         *p,
+			Version:         *v,
+			TaskIDs:         taskIds,
+			BuildName:       pair.Variant,
+			ActivateBuild:   activateVariant,
+			TasksToActivate: tasksToActivate,
+			TaskNames:       taskNames,
+			DisplayNames:    displayNames,
+			GeneratedBy:     generatedBy,
+			TaskCreateTime:  createTime,
+			SyncAtEndOpts:   syncAtEndOpts,
 		}
 
 		grip.Info(message.Fields{
@@ -1462,30 +1496,55 @@ func AddNewBuilds(ctx context.Context, activatedVariants []string, v *Version, p
 		if err = tasks.InsertUnordered(ctx); err != nil {
 			return nil, nil, errors.Wrapf(err, "error inserting tasks for build %s", build.Id)
 		}
+		batchTimeTasksToIds := map[string]string{}
+		for _, t := range tasks {
+			newTaskIds = append(newTaskIds, t.Id)
+			if !t.Activated {
+				batchTimeTasksToIds[t.DisplayName] = t.Id
+			}
+		}
 
 		newBuildIds = append(newBuildIds, build.Id)
 		var activateVariantAt time.Time
+		batchTimeTasks := []BatchTimeTaskStatus{}
+
+		// add any tasks/variants that have batchtime
 		if !activateVariant {
-			activateVariantAt, err = projectRef.GetActivationTimeForVariant(p.FindBuildVariant(pair.Variant))
+			activateVariantAt, err = pRef.GetActivationTimeForVariant(p.FindBuildVariant(pair.Variant))
 			grip.Error(message.WrapError(err, message.Fields{
 				"message": "unable to get activation time for variant",
 				"variant": pair.Variant,
 				"version": v.Id,
 			}))
+		} else {
+			for taskName, id := range batchTimeTasksToIds {
+				activateTaskAt, err := pRef.GetActivationTimeForTask(p.FindTaskForVariant(taskName, pair.Variant))
+				grip.Error(message.WrapError(err, message.Fields{
+					"message": "unable to get activation time for task",
+					"variant": pair.Variant,
+					"task":    taskName,
+					"version": v.Id,
+				}))
+				batchTimeTasks = append(batchTimeTasks, BatchTimeTaskStatus{
+					TaskId:   id,
+					TaskName: taskName,
+					ActivationStatus: ActivationStatus{
+						ActivateAt: activateTaskAt,
+					},
+				})
+			}
 		}
 		newBuildStatuses = append(newBuildStatuses,
 			VersionBuildStatus{
-				BuildVariant: pair.Variant,
-				BuildId:      build.Id,
+				BuildVariant:   pair.Variant,
+				BuildId:        build.Id,
+				BatchTimeTasks: batchTimeTasks,
 				ActivationStatus: ActivationStatus{
 					Activated:  activateVariant,
 					ActivateAt: activateVariantAt,
 				},
 			},
 		)
-		for _, t := range tasks {
-			newTaskIds = append(newTaskIds, t.Id)
-		}
 	}
 
 	return newBuildIds, newTaskIds, errors.WithStack(VersionUpdateOne(
@@ -1501,8 +1560,8 @@ func AddNewBuilds(ctx context.Context, activatedVariants []string, v *Version, p
 
 // Given a version and set of variant/task pairs, creates any tasks that don't exist yet,
 // within the set of already existing builds.
-func AddNewTasks(ctx context.Context, v *Version, p *Project, pairs TaskVariantPairs,
-	syncAtEndOpts patch.SyncAtEndOptions, generatedBy string) ([]string, error) {
+func addNewTasks(ctx context.Context, toActivate tasksAndVariantsToActivate, v *Version, p *Project, pRef *ProjectRef,
+	pairs TaskVariantPairs, syncAtEndOpts patch.SyncAtEndOptions, generatedBy string) ([]string, error) {
 	if v.BuildIds == nil {
 		return nil, nil
 	}
@@ -1537,13 +1596,15 @@ func AddNewTasks(ctx context.Context, v *Version, p *Project, pairs TaskVariantP
 		// build a list of tasks that haven't been created yet for the given variant, but have
 		// a record in the TVPairSet indicating that it should exist
 		tasksToAdd := []string{}
+		activatedExistingTasks := []string{}
 		for _, taskname := range pairs.ExecTasks.TaskNames(b.BuildVariant) {
 			if info, ok := existingTasksIndex[taskname]; ok {
-				// update task activation for dependencies that already exist, regardless of batchtime
+				// update task activation for dependencies that already exist, regardless of batchtime // TODO: should this check the task status in the version?
 				if !info.activated {
 					if err = SetActiveStateById(info.id, evergreen.User, true); err != nil {
 						return nil, errors.Wrapf(err, "problem updating active state for existing task '%s'", info.id)
 					}
+					activatedExistingTasks = append(activatedExistingTasks, taskname)
 				}
 				continue
 			}
@@ -1561,9 +1622,26 @@ func AddNewTasks(ctx context.Context, v *Version, p *Project, pairs TaskVariantP
 		}
 
 		// Add the new set of tasks to the build.
-		_, tasks, err := AddTasksToBuild(ctx, &b, p, v, tasksToAdd, displayTasksToAdd, generatedBy, tasksInBuild, syncAtEndOpts, distroAliases)
+		var tasksToActivate []string
+		if toActivate != nil { // if details are given, then only activate if the variant is specified
+			tasksToActivate, _ = toActivate[b.BuildVariant]
+		}
+		_, tasks, err := addTasksToBuild(ctx, &b, p, pRef, v, tasksToAdd, displayTasksToAdd, tasksToActivate, generatedBy, tasksInBuild, syncAtEndOpts, distroAliases)
 		if err != nil {
 			return nil, err
+		}
+
+		for i, bv := range v.BuildVariants {
+			if bv.BuildId != b.Id {
+				continue
+			}
+			// modify any existing
+			for j, bvt := range bv.BatchTimeTasks {
+				if utility.StringSliceContains(activatedExistingTasks, bvt.TaskName) {
+					v.BuildVariants[i].BatchTimeTasks[j].Activated = true
+					v.BuildVariants[i].BatchTimeTasks[j].ActivateAt = time.Now()
+				}
+			}
 		}
 
 		for _, t := range tasks {
