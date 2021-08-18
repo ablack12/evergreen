@@ -11,6 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/evergreen-ci/evergreen/rest/data"
+
+	"github.com/evergreen-ci/evergreen/rest/model"
+
 	"github.com/evergreen-ci/evergreen"
 	"github.com/evergreen-ci/evergreen/apimodels"
 	"github.com/evergreen-ci/evergreen/db"
@@ -1147,7 +1151,7 @@ func FindMergedProjectRefsForRepo(repoRef *RepoRef) ([]ProjectRef, error) {
 	return projectRefs, nil
 }
 
-func GetProjectSettingsEventById(projectId string) (*ProjectSettingsEvent, error) {
+func GetProjectSettingsById(projectId string) (*ProjectSettings, error) {
 	pRef, err := FindOneProjectRef(projectId)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error finding project ref")
@@ -1155,10 +1159,10 @@ func GetProjectSettingsEventById(projectId string) (*ProjectSettingsEvent, error
 	if pRef == nil {
 		return nil, errors.Errorf("couldn't find project ref")
 	}
-	return GetProjectSettingsEvents(pRef)
+	return GetProjectSettings(pRef)
 }
 
-func GetProjectSettingsEvents(p *ProjectRef) (*ProjectSettingsEvent, error) {
+func GetProjectSettings(p *ProjectRef) (*ProjectSettings, error) {
 	hook, err := FindGithubHook(p.Owner, p.Repo)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Database error finding github hook for project '%s'", p.Id)
@@ -1178,7 +1182,7 @@ func GetProjectSettingsEvents(p *ProjectRef) (*ProjectSettingsEvent, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "error finding subscription for project '%s'", p.Id)
 	}
-	projectSettingsEvent := ProjectSettingsEvent{
+	projectSettingsEvent := ProjectSettings{
 		ProjectRef:         *p,
 		GitHubHooksEnabled: hook != nil,
 		Vars:               *projectVars,
@@ -1383,12 +1387,159 @@ func saveProjectRefForSection(projectId string, p *ProjectRef, section ProjectRe
 	return true, nil
 }
 
+// SaveProjectSettingsForSection passes in the existing state of the project page, but saves only the pieces
+// related to the specified section.
+func SaveProjectSettingsForSection(ctx context.Context, sc data.Connector, projectId string, changes *model.APIProjectSettings, section ProjectRefSection, userId string) error {
+	before, err := GetProjectSettingsById(projectId)
+	if err != nil {
+		return errors.Wrap(err, "error getting before project settings event")
+	}
+	v, err := changes.ProjectRef.ToService()
+	if err != nil {
+		return errors.Wrap(err, "error converting project ref")
+	}
+	newProjectRef := v.(*ProjectRef)
+	// if the project ref doesn't use the repo, then this will just be the same as newProjectRef
+	// used to verify that if something is set to nil in the request, we properly validate using the merged project ref
+	mergedProjectRef, err := GetProjectRefMergedWithRepo(*newProjectRef)
+	if err != nil {
+		return errors.Wrapf(err, "error merging project ref")
+	}
+
+	catcher := grip.NewBasicCatcher()
+	modified := false
+	switch section {
+	case ProjectRefGeneralSection:
+		// check if webhook is enabled if the owner/repo has changed
+		if mergedProjectRef.Owner != before.ProjectRef.Owner || mergedProjectRef.Repo != before.ProjectRef.Repo {
+			_, err = sc.EnableWebhooks(ctx, mergedProjectRef)
+			if err != nil {
+				return errors.Wrapf(err, "Error enabling webhooks for project '%s'", projectId)
+			}
+		}
+		// TODO: handle force running the repotracker in the resolver (may depend on design conversation)
+	case ProjectRefAccessSection:
+		// For any admins that are only in the original settings, remove access.
+		// For any admins that are only in the updated settings, give them access.
+		adminsToDelete, adminsToAdd := utility.StringSliceSymmetricDifference(before.ProjectRef.Admins, newProjectRef.Admins)
+		if err = sc.UpdateAdminRoles(newProjectRef, adminsToAdd, adminsToDelete); err != nil {
+			return errors.Wrap(err, "error updating admin roles")
+		}
+		modified = true
+		if !before.ProjectRef.IsRestricted() && newProjectRef.IsRestricted() {
+			catcher.Wrap(before.ProjectRef.MakeRestricted(), "error making project restricted")
+		}
+		if before.ProjectRef.IsRestricted() && !newProjectRef.IsRestricted() {
+			catcher.Wrap(before.ProjectRef.MakeUnrestricted(), "error making unrestricted")
+		}
+
+	case ProjectRefVariablesSection:
+		if err = sc.UpdateProjectVars(projectId, &changes.Vars, false); err != nil { // destructively modifies vars
+			return errors.Wrapf(err, "Database error updating variables for project '%s'", projectId)
+		}
+	case ProjectRefGithubAndCQSection:
+		allInternalAliases := map[string]bool{}
+		projectCommitQueueAliasesExist := false
+		projectPRAliasesExist := false
+		projectGithubCheckAliasesExist := false
+		projectGitTagVersionAliasesExist := false
+		for _, a := range changes.Aliases {
+			aliasType := utility.FromStringPtr(a.Alias)
+			// skip patch aliases
+			if utility.StringSliceContains(evergreen.InternalAliases, aliasType) {
+				continue
+			}
+			allInternalAliases[utility.FromStringPtr(a.ID)] = true
+			if aliasType == evergreen.GithubPRAlias {
+				projectPRAliasesExist = true
+			}
+			if aliasType == evergreen.CommitQueueAlias {
+				projectCommitQueueAliasesExist = true
+			}
+			if aliasType == evergreen.GithubChecksAlias {
+				projectGithubCheckAliasesExist = true
+			}
+			if aliasType == evergreen.GitTagAlias {
+				projectGitTagVersionAliasesExist = true
+			}
+		}
+		// If anything is enabled, validate aliases
+		if mergedProjectRef.IsPRTestingEnabled() && !projectPRAliasesExist {
+			// do Repo aliases exist? Otherwise error.
+			repoAliases, err := findAliasInProject(newProjectRef.RepoRefId, evergreen.GithubPRAlias)
+			if err != nil {
+
+			}
+			if len(repoAliases) == 0 {
+
+			}
+			// check for aliases
+			// aliases either need to be defined in the project or the repo
+		}
+		if mergedProjectRef.CommitQueue.IsEnabled() && !projectCommitQueueAliasesExist {
+			// do commit queue aliases exist? Otherwise error.
+
+		}
+		if mergedProjectRef.IsGithubChecksEnabled() && !projectGithubCheckAliasesExist {
+			// do github check aliases exist? Otherwise error.
+		}
+		if mergedProjectRef.IsGitTagVersionsEnabled() && !projectGitTagVersionAliasesExist {
+			// do github tag aliases exist? Otherwise error.
+		}
+
+		// delete any aliases that were in the list before but are not now
+		for _, originalAlias := range before.Aliases {
+			// only look at internal aliases
+			if !utility.StringSliceContains(evergreen.InternalAliases, originalAlias.Alias) {
+				continue
+			}
+			id := originalAlias.ID.String()
+			if _, ok := allInternalAliases[id]; !ok {
+				catcher.Add(RemoveProjectAlias(id))
+			}
+		}
+	case ProjectRefPatchAliasSection:
+		// get all the aliases that aren't "deleted" and validate them
+	case ProjectRefNotificationsSection:
+		projectSubscriptions := map[string]bool{}
+		for i, sub := range changes.Subscriptions {
+			changes.Subscriptions[i].OwnerType = utility.ToStringPtr(string(event.OwnerTypeProject))
+			changes.Subscriptions[i].Owner = utility.ToStringPtr(projectId)
+			projectSubscriptions[utility.FromStringPtr(sub.ID)] = true
+		}
+		if err := sc.SaveSubscriptions(projectId, changes.Subscriptions); err != nil {
+			return errors.Wrap(err, "error saving new subscriptions")
+		}
+		modified = true
+
+		// delete any subscription that don't exist in the current project
+		toDelete := []string{}
+		for _, sub := range before.Subscriptions {
+			if _, ok := projectSubscriptions[sub.ID]; !ok {
+				toDelete = append(toDelete, sub.ID)
+			}
+		}
+		catcher.Wrapf(sc.DeleteSubscriptions(projectId, toDelete), "error deleting subscriptions")
+	}
+	// save project ref only after the rest of the section has been validated.
+	// How do we know here if ProjectRef should be nil or not? Or should we just pass in the project and update regardless of whether or not it's changed (like the API route?)
+	modified, err = saveProjectRefForSection(projectId, newProjectRef, section)
+	if err != nil {
+		return errors.Wrapf(err, "error defaulting project ref to repo for section '%s'", section)
+	}
+	if modified {
+		catcher.Add(getAndLogProjectModified(projectId, userId, before))
+	}
+
+	return errors.Wrapf(catcher.Resolve(), "error saving section '%s'", section)
+}
+
 // DefaultSectionToRepo modifies a subset of the project ref to use the repo values instead.
 // This subset is based on the pages used in Spruce.
 // If project settings aren't given, we should assume we're defaulting to repo and we need
 // to create our own project settings event  after completing the update.
 func DefaultSectionToRepo(projectId string, section ProjectRefSection, userId string) error {
-	before, err := GetProjectSettingsEventById(projectId)
+	before, err := GetProjectSettingsById(projectId)
 	if err != nil {
 		return errors.Wrap(err, "error getting before project settings event")
 	}
@@ -1456,8 +1607,8 @@ func DefaultSectionToRepo(projectId string, section ProjectRefSection, userId st
 	return errors.Wrapf(catcher.Resolve(), "error defaulting to repo for section '%s'", section)
 }
 
-func getAndLogProjectModified(id, userId string, before *ProjectSettingsEvent) error {
-	after, err := GetProjectSettingsEventById(id)
+func getAndLogProjectModified(id, userId string, before *ProjectSettings) error {
+	after, err := GetProjectSettingsById(id)
 	if err != nil {
 		return errors.Wrap(err, "error getting after project settings event")
 	}

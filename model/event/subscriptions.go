@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/evergreen-ci/evergreen/trigger"
+
 	"github.com/evergreen-ci/evergreen"
 	"github.com/evergreen-ci/evergreen/db"
 	"github.com/evergreen-ci/evergreen/util"
@@ -432,6 +434,38 @@ func FindSubscriptionsByOwner(owner string, ownerType OwnerType) ([]Subscription
 	subscriptions := []Subscription{}
 	err := db.FindAllQ(SubscriptionsCollection, query, &subscriptions)
 	return subscriptions, errors.Wrapf(err, "error retrieving subscriptions for owner %s", owner)
+}
+
+func ValidateSubscriptionForProject(subscriptions []Subscription, projectId string) error {
+	catcher := grip.NewBasicCatcher()
+	for _, subscription := range subscriptions {
+		subscription.Selectors = []Selector{
+			{
+				Type: "project",
+				Data: projectId,
+			},
+		}
+		if subscription.TriggerData != nil && subscription.TriggerData[SelectorRequester] != "" {
+			subscription.Selectors = append(subscription.Selectors, Selector{
+				Type: "requester",
+				Data: subscription.TriggerData[SelectorRequester],
+			})
+		} else {
+			subscription.Selectors = append(subscription.Selectors, Selector{
+				Type: "requester",
+				Data: evergreen.RepotrackerVersionRequester,
+			})
+		}
+		subscription.OwnerType = OwnerTypeProject
+		if subscription.Owner != projectId {
+			subscription.Owner = projectId
+			subscription.ID = ""
+		}
+		if !trigger.ValidateTrigger(subscription.ResourceType, subscription.Trigger) {
+			catcher.Add(errors.Errorf("subscription type/trigger is invalid: %s/%s", subscription.ResourceType, subscription.Trigger))
+		}
+	}
+	return catcher.Resolve()
 }
 
 func IsValidOwnerType(in string) bool {
