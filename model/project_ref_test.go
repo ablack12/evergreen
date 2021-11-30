@@ -74,6 +74,7 @@ func TestFindMergedProjectRef(t *testing.T) {
 	projectRef := &ProjectRef{
 		Owner:                 "mongodb",
 		RepoRefId:             "mongodb_mci",
+		Branch:                "",
 		BatchTime:             10,
 		Id:                    "ident",
 		Admins:                []string{"john.smith", "john.doe"},
@@ -130,6 +131,7 @@ func TestFindMergedProjectRef(t *testing.T) {
 	assert.False(t, mergedProject.IsGithubChecksEnabled())
 	assert.True(t, mergedProject.IsPRTestingEnabled())
 	assert.Equal(t, "my-path", mergedProject.SpawnHostScriptPath)
+	assert.Equal(t, mergedProject.Branch, "main")
 	assert.False(t, utility.FromBoolPtr(mergedProject.TaskSync.ConfigEnabled))
 	assert.True(t, utility.FromBoolPtr(mergedProject.TaskSync.PatchEnabled))
 	assert.Len(t, mergedProject.GitTagAuthorizedTeams, 0) // empty lists take precedent
