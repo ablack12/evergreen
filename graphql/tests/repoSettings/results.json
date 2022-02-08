@@ -10,6 +10,7 @@
               "id": "1234",
               "commitQueue": {
                 "enabled": true,
+                "requireSigned": false,
                 "mergeMethod": "squash"
               },
               "periodicBuilds": null,
