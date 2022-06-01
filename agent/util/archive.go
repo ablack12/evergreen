@@ -91,7 +91,11 @@ func streamArchiveContents(ctx context.Context, rootPath string, includes, exclu
 		} else {
 			walk = func(path string, info os.FileInfo, err error) error {
 				a, b := filepath.Split(path)
-				if filepath.Clean(a) == filepath.Clean(dir) {
+				dirMatch, err := filepath.Match(filepath.Clean(a), filepath.Clean(dir))
+				if err != nil {
+					archiveContents = append(archiveContents, ArchiveContentFile{err: err})
+				}
+				if dirMatch {
 					match, err := filepath.Match(filematch, b)
 					if err != nil {
 						archiveContents = append(archiveContents, ArchiveContentFile{err: err})
