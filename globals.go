@@ -290,7 +290,7 @@ const (
 	SpawnHostNoExpirationDuration    = 7 * 24 * time.Hour
 	MaxVolumeExpirationDurationHours = 24 * time.Hour * 14
 	UnattachedVolumeExpiration       = 24 * time.Hour * 30
-	DefaultMaxVolumeSizePerUser      = 500
+	DefaultMaxVolumeSizePerUser      = 256 // Should be a power of two
 	DefaultUnexpirableHostsPerUser   = 1
 	DefaultUnexpirableVolumesPerUser = 1
 
