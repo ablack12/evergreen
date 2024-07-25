@@ -130,7 +130,8 @@ Options:
     be visible on the projects page or by API routes. Per  
     [Evergreen policy](https://mongodb.stackenterprise.co/questions/1232), private variables cannot be retrieved. 
 -   Checking **admin only** ensures that the variable can only be used
-    by admins and mainline commits.
+    by admins and non-patches (i.e. mainline commits, git tag triggered
+    versions, project triggered versions, and periodic builds).
 
 ### Aliases
 
