@@ -1943,6 +1943,7 @@ type ComplexityRoot struct {
 		DisplayStatus           func(childComplexity int) int
 		DisplayTask             func(childComplexity int) int
 		DistroId                func(childComplexity int) int
+		Errors                  func(childComplexity int) int
 		EstimatedStart          func(childComplexity int) int
 		Execution               func(childComplexity int) int
 		ExecutionTasks          func(childComplexity int) int
@@ -2726,6 +2727,7 @@ type TaskResolver interface {
 
 	DisplayTask(ctx context.Context, obj *model.APITask) (*model.APITask, error)
 
+	Errors(ctx context.Context, obj *model.APITask) ([]string, error)
 	EstimatedStart(ctx context.Context, obj *model.APITask) (*model.APIDuration, error)
 
 	ExecutionTasksFull(ctx context.Context, obj *model.APITask) ([]*model.APITask, error)
@@ -10819,6 +10821,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Task.DistroId(childComplexity), true
+	case "Task.errors":
+		if e.complexity.Task.Errors == nil {
+			break
+		}
+
+		return e.complexity.Task.Errors(childComplexity), true
 	case "Task.estimatedStart":
 		if e.complexity.Task.EstimatedStart == nil {
 			break
@@ -20497,6 +20505,8 @@ func (ec *executionContext) fieldContext_AdminTasksToRestartPayload_tasksToResta
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -29430,6 +29440,8 @@ func (ec *executionContext) fieldContext_GroupedBuildVariant_tasks(_ context.Con
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -32907,6 +32919,8 @@ func (ec *executionContext) fieldContext_Image_latestTask(_ context.Context, fie
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -35621,6 +35635,8 @@ func (ec *executionContext) fieldContext_LogkeeperBuild_task(_ context.Context, 
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -39575,6 +39591,8 @@ func (ec *executionContext) fieldContext_Mutation_abortTask(ctx context.Context,
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -39778,6 +39796,8 @@ func (ec *executionContext) fieldContext_Mutation_overrideTaskDependencies(ctx c
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -39981,6 +40001,8 @@ func (ec *executionContext) fieldContext_Mutation_restartTask(ctx context.Contex
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -40184,6 +40206,8 @@ func (ec *executionContext) fieldContext_Mutation_scheduleTasks(ctx context.Cont
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -40387,6 +40411,8 @@ func (ec *executionContext) fieldContext_Mutation_setTaskPriority(ctx context.Co
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -40590,6 +40616,8 @@ func (ec *executionContext) fieldContext_Mutation_setTaskPriorities(ctx context.
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -40793,6 +40821,8 @@ func (ec *executionContext) fieldContext_Mutation_unscheduleTask(ctx context.Con
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -41974,6 +42004,8 @@ func (ec *executionContext) fieldContext_Mutation_scheduleUndispatchedBaseTasks(
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -46697,6 +46729,8 @@ func (ec *executionContext) fieldContext_Pod_task(_ context.Context, field graph
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -47134,6 +47168,8 @@ func (ec *executionContext) fieldContext_PodEventLogData_task(_ context.Context,
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -53247,6 +53283,8 @@ func (ec *executionContext) fieldContext_Query_task(ctx context.Context, field g
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -53450,6 +53488,8 @@ func (ec *executionContext) fieldContext_Query_taskAllExecutions(ctx context.Con
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -61890,6 +61930,8 @@ func (ec *executionContext) fieldContext_Task_baseTask(_ context.Context, field 
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -62697,6 +62739,8 @@ func (ec *executionContext) fieldContext_Task_displayTask(_ context.Context, fie
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -62822,6 +62866,35 @@ func (ec *executionContext) fieldContext_Task_distroId(_ context.Context, field 
 		Field:      field,
 		IsMethod:   false,
 		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Task_errors(ctx context.Context, field graphql.CollectedField, obj *model.APITask) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Task_errors,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Task().Errors(ctx, obj)
+		},
+		nil,
+		ec.marshalOString2ᚕstringᚄ,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Task_errors(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Task",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
 		},
@@ -63004,6 +63077,8 @@ func (ec *executionContext) fieldContext_Task_executionTasksFull(_ context.Conte
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -63404,6 +63479,8 @@ func (ec *executionContext) fieldContext_Task_generator(_ context.Context, field
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -66087,6 +66164,8 @@ func (ec *executionContext) fieldContext_TaskHistory_tasks(_ context.Context, fi
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -70113,6 +70192,8 @@ func (ec *executionContext) fieldContext_UpstreamProject_task(_ context.Context,
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -73385,6 +73466,8 @@ func (ec *executionContext) fieldContext_VersionTasks_data(_ context.Context, fi
 				return ec.fieldContext_Task_displayTask(ctx, field)
 			case "distroId":
 				return ec.fieldContext_Task_distroId(ctx, field)
+			case "errors":
+				return ec.fieldContext_Task_errors(ctx, field)
 			case "estimatedStart":
 				return ec.fieldContext_Task_estimatedStart(ctx, field)
 			case "execution":
@@ -103560,6 +103643,39 @@ func (ec *executionContext) _Task(ctx context.Context, sel ast.SelectionSet, obj
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "errors":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Task_errors(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "estimatedStart":
 			field := field
 
