@@ -1407,6 +1407,7 @@ type ComplexityRoot struct {
 		RepotrackerDisabled                func(childComplexity int) int
 		RepotrackerError                   func(childComplexity int) int
 		Restricted                         func(childComplexity int) int
+		RunEveryMainlineCommit             func(childComplexity int) int
 		SpawnHostScriptPath                func(childComplexity int) int
 		StepbackBisect                     func(childComplexity int) int
 		StepbackDisabled                   func(childComplexity int) int
@@ -1609,6 +1610,7 @@ type ComplexityRoot struct {
 		Repo                               func(childComplexity int) int
 		RepotrackerDisabled                func(childComplexity int) int
 		Restricted                         func(childComplexity int) int
+		RunEveryMainlineCommit             func(childComplexity int) int
 		SpawnHostScriptPath                func(childComplexity int) int
 		StepbackBisect                     func(childComplexity int) int
 		StepbackDisabled                   func(childComplexity int) int
@@ -8443,6 +8445,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Project.Restricted(childComplexity), true
+	case "Project.runEveryMainlineCommit":
+		if e.complexity.Project.RunEveryMainlineCommit == nil {
+			break
+		}
+
+		return e.complexity.Project.RunEveryMainlineCommit(childComplexity), true
 	case "Project.spawnHostScriptPath":
 		if e.complexity.Project.SpawnHostScriptPath == nil {
 			break
@@ -9514,6 +9522,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.RepoRef.Restricted(childComplexity), true
+	case "RepoRef.runEveryMainlineCommit":
+		if e.complexity.RepoRef.RunEveryMainlineCommit == nil {
+			break
+		}
+
+		return e.complexity.RepoRef.RunEveryMainlineCommit(childComplexity), true
 	case "RepoRef.spawnHostScriptPath":
 		if e.complexity.RepoRef.SpawnHostScriptPath == nil {
 			break
@@ -29841,6 +29855,8 @@ func (ec *executionContext) fieldContext_GroupedProjects_projects(_ context.Cont
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -29956,6 +29972,8 @@ func (ec *executionContext) fieldContext_GroupedProjects_repo(_ context.Context,
 				return ec.fieldContext_RepoRef_repotrackerDisabled(ctx, field)
 			case "restricted":
 				return ec.fieldContext_RepoRef_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_RepoRef_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_RepoRef_spawnHostScriptPath(ctx, field)
 			case "debugSpawnHostsDisabled":
@@ -37922,6 +37940,8 @@ func (ec *executionContext) fieldContext_Mutation_attachProjectToNewRepo(ctx con
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -38071,6 +38091,8 @@ func (ec *executionContext) fieldContext_Mutation_attachProjectToRepo(ctx contex
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -38220,6 +38242,8 @@ func (ec *executionContext) fieldContext_Mutation_createProject(ctx context.Cont
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -38369,6 +38393,8 @@ func (ec *executionContext) fieldContext_Mutation_copyProject(ctx context.Contex
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -38686,6 +38712,8 @@ func (ec *executionContext) fieldContext_Mutation_detachProjectFromRepo(ctx cont
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -41095,6 +41123,8 @@ func (ec *executionContext) fieldContext_Mutation_addFavoriteProject(ctx context
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -41394,6 +41424,8 @@ func (ec *executionContext) fieldContext_Mutation_removeFavoriteProject(ctx cont
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -44725,6 +44757,8 @@ func (ec *executionContext) fieldContext_Patch_projectMetadata(_ context.Context
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -49111,6 +49145,35 @@ func (ec *executionContext) fieldContext_Project_restricted(_ context.Context, f
 	return fc, nil
 }
 
+func (ec *executionContext) _Project_runEveryMainlineCommit(ctx context.Context, field graphql.CollectedField, obj *model.APIProjectRef) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Project_runEveryMainlineCommit,
+		func(ctx context.Context) (any, error) {
+			return obj.RunEveryMainlineCommit, nil
+		},
+		nil,
+		ec.marshalOBoolean2ᚖbool,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Project_runEveryMainlineCommit(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Project",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Project_spawnHostScriptPath(ctx context.Context, field graphql.CollectedField, obj *model.APIProjectRef) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -50342,6 +50405,8 @@ func (ec *executionContext) fieldContext_ProjectEventSettings_projectRef(_ conte
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -50817,6 +50882,8 @@ func (ec *executionContext) fieldContext_ProjectSettings_projectRef(_ context.Co
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -52636,6 +52703,8 @@ func (ec *executionContext) fieldContext_Query_project(ctx context.Context, fiel
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -55705,6 +55774,35 @@ func (ec *executionContext) fieldContext_RepoRef_restricted(_ context.Context, f
 	return fc, nil
 }
 
+func (ec *executionContext) _RepoRef_runEveryMainlineCommit(ctx context.Context, field graphql.CollectedField, obj *model.APIProjectRef) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_RepoRef_runEveryMainlineCommit,
+		func(ctx context.Context) (any, error) {
+			return obj.RunEveryMainlineCommit, nil
+		},
+		nil,
+		ec.marshalNBoolean2ᚖbool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_RepoRef_runEveryMainlineCommit(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RepoRef",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _RepoRef_spawnHostScriptPath(ctx context.Context, field graphql.CollectedField, obj *model.APIProjectRef) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -56286,6 +56384,8 @@ func (ec *executionContext) fieldContext_RepoSettings_projectRef(_ context.Conte
 				return ec.fieldContext_RepoRef_repotrackerDisabled(ctx, field)
 			case "restricted":
 				return ec.fieldContext_RepoRef_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_RepoRef_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_RepoRef_spawnHostScriptPath(ctx, field)
 			case "debugSpawnHostsDisabled":
@@ -64167,6 +64267,8 @@ func (ec *executionContext) fieldContext_Task_project(_ context.Context, field g
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -72773,6 +72875,8 @@ func (ec *executionContext) fieldContext_Version_projectMetadata(_ context.Conte
 				return ec.fieldContext_Project_repotrackerError(ctx, field)
 			case "restricted":
 				return ec.fieldContext_Project_restricted(ctx, field)
+			case "runEveryMainlineCommit":
+				return ec.fieldContext_Project_runEveryMainlineCommit(ctx, field)
 			case "spawnHostScriptPath":
 				return ec.fieldContext_Project_spawnHostScriptPath(ctx, field)
 			case "stepbackDisabled":
@@ -83353,7 +83457,7 @@ func (ec *executionContext) unmarshalInputProjectInput(ctx context.Context, obj 
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"id", "admins", "banner", "batchTime", "branch", "buildBaronSettings", "commitQueue", "containerSizeDefinitions", "deactivatePrevious", "debugSpawnHostsDisabled", "disabledStatsCache", "dispatchingDisabled", "displayName", "enabled", "externalLinks", "githubChecksEnabled", "githubDynamicTokenPermissionGroups", "githubPermissionGroupByRequester", "githubPRTriggerAliases", "githubMQTriggerAliases", "gitTagAuthorizedTeams", "gitTagAuthorizedUsers", "gitTagVersionsEnabled", "identifier", "manualPrTestingEnabled", "notifyOnBuildFailure", "oldestAllowedMergeBase", "owner", "parsleyFilters", "patchingDisabled", "patchTriggerAliases", "perfEnabled", "periodicBuilds", "projectHealthView", "prTestingEnabled", "remotePath", "repo", "repotrackerDisabled", "restricted", "spawnHostScriptPath", "stepbackDisabled", "stepbackBisect", "taskAnnotationSettings", "testSelection", "tracksPushEvents", "triggers", "versionControlEnabled", "workstationConfig"}
+	fieldsInOrder := [...]string{"id", "admins", "banner", "batchTime", "branch", "buildBaronSettings", "commitQueue", "containerSizeDefinitions", "deactivatePrevious", "debugSpawnHostsDisabled", "disabledStatsCache", "dispatchingDisabled", "displayName", "enabled", "externalLinks", "githubChecksEnabled", "githubDynamicTokenPermissionGroups", "githubPermissionGroupByRequester", "githubPRTriggerAliases", "githubMQTriggerAliases", "gitTagAuthorizedTeams", "gitTagAuthorizedUsers", "gitTagVersionsEnabled", "identifier", "manualPrTestingEnabled", "notifyOnBuildFailure", "oldestAllowedMergeBase", "owner", "parsleyFilters", "patchingDisabled", "patchTriggerAliases", "perfEnabled", "periodicBuilds", "projectHealthView", "prTestingEnabled", "remotePath", "repo", "repotrackerDisabled", "restricted", "runEveryMainlineCommit", "spawnHostScriptPath", "stepbackDisabled", "stepbackBisect", "taskAnnotationSettings", "testSelection", "tracksPushEvents", "triggers", "versionControlEnabled", "workstationConfig"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -83633,6 +83737,13 @@ func (ec *executionContext) unmarshalInputProjectInput(ctx context.Context, obj 
 				return it, err
 			}
 			it.Restricted = data
+		case "runEveryMainlineCommit":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("runEveryMainlineCommit"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.RunEveryMainlineCommit = data
 		case "spawnHostScriptPath":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("spawnHostScriptPath"))
 			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
@@ -84195,7 +84306,7 @@ func (ec *executionContext) unmarshalInputRepoRefInput(ctx context.Context, obj 
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"id", "admins", "batchTime", "buildBaronSettings", "commitQueue", "deactivatePrevious", "disabledStatsCache", "dispatchingDisabled", "displayName", "enabled", "externalLinks", "githubChecksEnabled", "githubDynamicTokenPermissionGroups", "githubPermissionGroupByRequester", "githubPRTriggerAliases", "githubMQTriggerAliases", "gitTagAuthorizedTeams", "gitTagAuthorizedUsers", "gitTagVersionsEnabled", "manualPrTestingEnabled", "notifyOnBuildFailure", "oldestAllowedMergeBase", "owner", "parsleyFilters", "patchingDisabled", "patchTriggerAliases", "perfEnabled", "periodicBuilds", "prTestingEnabled", "remotePath", "repo", "repotrackerDisabled", "restricted", "spawnHostScriptPath", "debugSpawnHostsDisabled", "stepbackDisabled", "stepbackBisect", "taskAnnotationSettings", "testSelection", "tracksPushEvents", "triggers", "versionControlEnabled", "workstationConfig", "containerSizeDefinitions"}
+	fieldsInOrder := [...]string{"id", "admins", "batchTime", "buildBaronSettings", "commitQueue", "deactivatePrevious", "disabledStatsCache", "dispatchingDisabled", "displayName", "enabled", "externalLinks", "githubChecksEnabled", "githubDynamicTokenPermissionGroups", "githubPermissionGroupByRequester", "githubPRTriggerAliases", "githubMQTriggerAliases", "gitTagAuthorizedTeams", "gitTagAuthorizedUsers", "gitTagVersionsEnabled", "manualPrTestingEnabled", "notifyOnBuildFailure", "oldestAllowedMergeBase", "owner", "parsleyFilters", "patchingDisabled", "patchTriggerAliases", "perfEnabled", "periodicBuilds", "prTestingEnabled", "remotePath", "repo", "repotrackerDisabled", "restricted", "runEveryMainlineCommit", "spawnHostScriptPath", "debugSpawnHostsDisabled", "stepbackDisabled", "stepbackBisect", "taskAnnotationSettings", "testSelection", "tracksPushEvents", "triggers", "versionControlEnabled", "workstationConfig", "containerSizeDefinitions"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -84433,6 +84544,13 @@ func (ec *executionContext) unmarshalInputRepoRefInput(ctx context.Context, obj 
 				return it, err
 			}
 			it.Restricted = data
+		case "runEveryMainlineCommit":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("runEveryMainlineCommit"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.RunEveryMainlineCommit = data
 		case "spawnHostScriptPath":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("spawnHostScriptPath"))
 			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
@@ -98599,6 +98717,8 @@ func (ec *executionContext) _Project(ctx context.Context, sel ast.SelectionSet, 
 			out.Values[i] = ec._Project_repotrackerError(ctx, field, obj)
 		case "restricted":
 			out.Values[i] = ec._Project_restricted(ctx, field, obj)
+		case "runEveryMainlineCommit":
+			out.Values[i] = ec._Project_runEveryMainlineCommit(ctx, field, obj)
 		case "spawnHostScriptPath":
 			out.Values[i] = ec._Project_spawnHostScriptPath(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -100840,6 +100960,11 @@ func (ec *executionContext) _RepoRef(ctx context.Context, sel ast.SelectionSet, 
 			}
 		case "restricted":
 			out.Values[i] = ec._RepoRef_restricted(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "runEveryMainlineCommit":
+			out.Values[i] = ec._RepoRef_runEveryMainlineCommit(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
