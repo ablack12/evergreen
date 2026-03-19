@@ -692,11 +692,7 @@ func CreateVersionFromConfig(ctx context.Context, projectInfo *model.ProjectInfo
 func ShellVersionFromRevision(ctx context.Context, ref *model.ProjectRef, metadata model.VersionMetadata) (*model.Version, error) {
 	var err error
 
-	usr, err := resolveUserFromMetadata(ctx, metadata)
-	if err != nil {
-		return nil, errors.Wrap(err, "resolving user from metadata")
-	}
-	if usr != nil {
+	if usr := resolveUserFromMetadata(ctx, metadata); usr != nil {
 		metadata.User = usr
 	}
 
@@ -772,7 +768,7 @@ func ShellVersionFromRevision(ctx context.Context, ref *model.ProjectRef, metada
 	return v, nil
 }
 
-func resolveUserFromMetadata(ctx context.Context, metadata model.VersionMetadata) (*user.DBUser, error) {
+func resolveUserFromMetadata(ctx context.Context, metadata model.VersionMetadata) *user.DBUser {
 	var usr *user.DBUser
 	var err error
 	catcher := grip.NewBasicCatcher()
@@ -797,8 +793,9 @@ func resolveUserFromMetadata(ctx context.Context, metadata model.VersionMetadata
 		"revision_author_uid": metadata.Revision.AuthorGithubUID,
 		"revision_author":     metadata.Revision.Author,
 		"derived_id":          derivedID,
+		"errors":              catcher.Resolve(),
 	})
-	return usr, catcher.Resolve()
+	return usr
 }
 
 // deriveUserID converts a display name to a likely Evergreen user ID by
