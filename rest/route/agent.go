@@ -675,8 +675,6 @@ func (h *attachFilesHandler) Run(ctx context.Context) gimlet.Responder {
 
 	discoverAndCacheBucketLifecycleRules(ctx, t, h.files)
 
-	calculateAndReportFilePutCosts(ctx, h.taskID, h.files)
-
 	entry := &artifact.Entry{
 		TaskId:          t.Id,
 		TaskDisplayName: t.DisplayName,
@@ -692,43 +690,6 @@ func (h *attachFilesHandler) Run(ctx context.Context) gimlet.Responder {
 		return gimlet.MakeJSONInternalErrorResponder(errors.New(message))
 	}
 	return gimlet.NewJSONResponse(fmt.Sprintf("Artifact files for task %s successfully attached", t.Id))
-}
-
-// calculateAndReportFilePutCosts calculates per-file S3 PUT costs and emits an OTEL span with cost statistics.
-func calculateAndReportFilePutCosts(ctx context.Context, taskID string, files []artifact.File) {
-	if len(files) == 0 {
-		return
-	}
-
-	costConfig := &evergreen.CostConfig{}
-	if err := costConfig.Get(ctx); err != nil {
-		costConfig = nil
-	}
-
-	files[0].PutCost = s3usage.CalculateS3PutCostWithConfig(files[0].PutRequests, costConfig)
-	minCost := files[0].PutCost
-	maxCost := files[0].PutCost
-	totalCost := files[0].PutCost
-	for i := 1; i < len(files); i++ {
-		files[i].PutCost = s3usage.CalculateS3PutCostWithConfig(files[i].PutRequests, costConfig)
-		totalCost += files[i].PutCost
-		if files[i].PutCost < minCost {
-			minCost = files[i].PutCost
-		}
-		if files[i].PutCost > maxCost {
-			maxCost = files[i].PutCost
-		}
-	}
-	avgCost := totalCost / float64(len(files))
-
-	_, span := tracer.Start(ctx, "s3-put-command-cost")
-	span.SetAttributes(
-		attribute.String(evergreen.TaskIDOtelAttribute, taskID),
-		attribute.Float64(evergreen.S3PutCostAvgFilePutCostOtelAttribute, avgCost),
-		attribute.Float64(evergreen.S3PutCostMaxFilePutCostOtelAttribute, maxCost),
-		attribute.Float64(evergreen.S3PutCostMinFilePutCostOtelAttribute, minCost),
-	)
-	span.End()
 }
 
 // discoverAndCacheBucketLifecycleRules will look at all the buckets that the files are being uploaded
@@ -803,6 +764,9 @@ func (h *reportS3UsageHandler) Parse(ctx context.Context, r *http.Request) error
 }
 
 func (h *reportS3UsageHandler) Run(ctx context.Context) gimlet.Responder {
+	ctx, span := tracer.Start(ctx, evergreen.S3CostTrackingOtelSpanName)
+	defer span.End()
+
 	t, err := task.FindOneId(ctx, h.taskID)
 	if err != nil {
 		return gimlet.MakeJSONInternalErrorResponder(errors.Wrapf(err, "finding task '%s'", h.taskID))
@@ -822,6 +786,29 @@ func (h *reportS3UsageHandler) Run(ctx context.Context) gimlet.Responder {
 		}))
 		return gimlet.MakeJSONInternalErrorResponder(errors.Wrapf(err, "saving S3 usage for task '%s'", h.taskID))
 	}
+
+	s3Attrs := []attribute.KeyValue{
+		attribute.String(evergreen.TaskIDOtelAttribute, t.Id),
+		attribute.Int(evergreen.S3ArtifactPutRequestsOtelAttribute, t.S3Usage.Artifacts.PutRequests),
+		attribute.Int64(evergreen.S3ArtifactUploadBytesOtelAttribute, t.S3Usage.Artifacts.UploadBytes),
+		attribute.Int(evergreen.S3ArtifactCountOtelAttribute, t.S3Usage.Artifacts.Count),
+		attribute.Float64(evergreen.S3ArtifactPutCostOtelAttribute, t.TaskCost.S3ArtifactPutCost),
+		attribute.Int(evergreen.S3LogPutRequestsOtelAttribute, t.S3Usage.Logs.PutRequests),
+		attribute.Int64(evergreen.S3LogUploadBytesOtelAttribute, t.S3Usage.Logs.UploadBytes),
+		attribute.Float64(evergreen.S3LogPutCostOtelAttribute, t.TaskCost.S3LogPutCost),
+	}
+
+	if t.S3Usage.Artifacts.Count > 0 && t.S3Usage.Artifacts.PutRequests > 0 {
+		costPerPut := t.TaskCost.S3ArtifactPutCost / float64(t.S3Usage.Artifacts.PutRequests)
+		s3Attrs = append(s3Attrs,
+			attribute.Float64(evergreen.S3ArtifactAvgFilePutCostOtelAttribute, t.TaskCost.S3ArtifactPutCost/float64(t.S3Usage.Artifacts.Count)),
+			attribute.Float64(evergreen.S3ArtifactWithMaxPutRequestsCostOtelAttribute, costPerPut*float64(t.S3Usage.Artifacts.ArtifactWithMaxPutRequests)),
+			attribute.Float64(evergreen.S3ArtifactWithMinPutRequestsCostOtelAttribute, costPerPut*float64(t.S3Usage.Artifacts.ArtifactWithMinPutRequests)),
+		)
+	}
+
+	span.SetAttributes(s3Attrs...)
+
 	return gimlet.NewJSONResponse(struct{}{})
 }
 

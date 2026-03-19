@@ -1208,10 +1208,6 @@ func (a *Agent) finishTask(ctx context.Context, tc *taskContext, status string, 
 	_ = a.killProcs(ctx, tc, false, "task is ending")
 
 	if tc.logger != nil {
-		if !tc.s3Usage.IsZero() {
-			tc.logger.Task().Infof("S3 artifact upload summary: files=%d, PUT_requests=%d, bytes=%d",
-				tc.s3Usage.UserFiles.FileCount, tc.s3Usage.UserFiles.PutRequests, tc.s3Usage.UserFiles.UploadBytes)
-		}
 		tc.logger.Execution().Infof("Sending final task status: '%s'.", detail.Status)
 		flushCtx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
