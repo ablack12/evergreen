@@ -2011,8 +2011,7 @@ func TestResolveUserFromMetadata(t *testing.T) {
 			require.NoError(t, loginUser.Insert(ctx))
 			require.NoError(t, derivedUser.Insert(ctx))
 
-			usr, err := resolveUserFromMetadata(ctx, tc.metadata)
-			require.NoError(t, err)
+			usr := resolveUserFromMetadata(ctx, tc.metadata)
 			if tc.expectedUser == nil {
 				assert.Nil(t, usr)
 			} else {
