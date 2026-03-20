@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +21,7 @@ import (
 	agentutil "github.com/evergreen-ci/evergreen/agent/util"
 	"github.com/evergreen-ci/evergreen/apimodels"
 	"github.com/evergreen-ci/evergreen/model"
+	"github.com/evergreen-ci/evergreen/model/s3usage"
 	"github.com/evergreen-ci/evergreen/model/task"
 	"github.com/evergreen-ci/evergreen/thirdparty/docker"
 	"github.com/evergreen-ci/evergreen/util"
@@ -28,6 +31,7 @@ import (
 	"github.com/mongodb/grip/recovery"
 	"github.com/mongodb/grip/send"
 	"github.com/mongodb/jasper"
+	"github.com/mongodb/jasper/options"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -37,7 +41,10 @@ import (
 	"google.golang.org/grpc"
 )
 
-const hostAttribute = "evergreen.host"
+const (
+	hostAttribute = "evergreen.host"
+	ps            = "ps"
+)
 
 var (
 	shouldExitAttribute = fmt.Sprintf("%s.should_exit", hostAttribute)
@@ -70,11 +77,8 @@ type Options struct {
 	// Mode determines which mode the agent will run in.
 	Mode globals.Mode
 	// HostID and HostSecret only apply in host mode.
-	HostID     string
-	HostSecret string
-	// PodID and PodSecret only apply in pod mode.
-	PodID                  string
-	PodSecret              string
+	HostID                 string
+	HostSecret             string
 	StatusPort             int
 	LogPrefix              string
 	LogOutput              globals.LogOutputType
@@ -97,9 +101,6 @@ type Options struct {
 func (o *Options) AddLoggableInfo(msg message.Fields) message.Fields {
 	if o.HostID != "" {
 		msg["host_id"] = o.HostID
-	}
-	if o.PodID != "" {
-		msg["pod_id"] = o.PodID
 	}
 	return msg
 }
@@ -133,8 +134,6 @@ func New(ctx context.Context, opts Options, serverURL string) (*Agent, error) {
 	switch opts.Mode {
 	case globals.HostMode:
 		comm = client.NewHostCommunicator(serverURL, opts.HostID, opts.HostSecret)
-	case globals.PodMode:
-		comm = client.NewPodCommunicator(serverURL, opts.PodID, opts.PodSecret)
 	default:
 		return nil, errors.Errorf("unrecognized agent mode '%s'", opts.Mode)
 	}
@@ -484,6 +483,8 @@ func (a *Agent) setupTask(agentCtx, setupCtx context.Context, initialTC *taskCon
 		return a.handleSetupError(setupCtx, tc, errors.Wrap(err, "making task config"))
 	}
 	tc.taskConfig = taskConfig
+	// Wire up S3Usage pointer so commands can increment runtime S3 usage
+	tc.taskConfig.S3Usage = &tc.s3Usage
 
 	if err := a.startLogging(agentCtx, tc); err != nil {
 		tc.logger = client.NewSingleChannelLogHarness("agent.error", a.defaultLogger)
@@ -614,6 +615,9 @@ func (a *Agent) fetchTaskInfo(ctx context.Context, tc *taskContext) (*taskInfo, 
 		return nil, errors.Wrap(err, "getting task")
 	}
 
+	// Reset S3Usage for this execution to avoid accumulating from previous restarts
+	opts.task.S3Usage = s3usage.S3Usage{}
+
 	opts.expansionsAndVars, err = a.comm.GetExpansionsAndVars(ctx, tc.task)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting expansions and variables")
@@ -624,27 +628,7 @@ func (a *Agent) fetchTaskInfo(ctx context.Context, tc *taskContext) (*taskInfo, 
 		return nil, errors.Wrap(err, "getting task's display task info")
 	}
 
-	// GetExpansionsAndVars does not include build variant expansions or project
-	// parameters, so load them from the project.
-	for _, bv := range opts.project.BuildVariants {
-		if bv.Name == opts.task.BuildVariant {
-			opts.expansionsAndVars.Expansions.Update(bv.Expansions)
-			break
-		}
-	}
-	opts.expansionsAndVars.Expansions.Update(opts.expansionsAndVars.Vars)
-	for _, param := range opts.project.Parameters {
-		// If the key doesn't exist, the value will default to "" anyway; this
-		// prevents an un-specified project parameter from overwriting
-		// lower-priority expansions.
-		if param.Value != "" {
-			opts.expansionsAndVars.Expansions.Put(param.Key, param.Value)
-		}
-	}
-	// Overwrite any empty values here since these parameters were explicitly
-	// user-specified.
-	opts.expansionsAndVars.Expansions.Update(opts.expansionsAndVars.Parameters)
-
+	agentutil.AddVariantAndParameterExpansions(opts.expansionsAndVars, opts.project, opts.task.BuildVariant)
 	return opts, nil
 }
 
@@ -693,7 +677,20 @@ func (a *Agent) runTask(ctx context.Context, tcInput *taskContext, nt *apimodels
 		return tc, shouldExit, errors.Wrap(err, "setting up task")
 	}
 
-	defer a.killProcs(ctx, tc, false, "task is finished")
+	defer func() {
+		if err := a.killProcs(ctx, tc, false, "task is finished"); err != nil {
+			// If the task is finished but the agent can't clean up all the
+			// processes/Docker artifacts for the next task, disable the host.
+			// Otherwise, the next task will start with lingering state from the
+			// prior task.
+			tc.logger.Execution().Criticalf("Unable to clean up processes/Docker artifacts for finished task, disabling this host. Error: %s", err.Error())
+			if disableErr := a.comm.DisableHost(ctx, a.opts.HostID, apimodels.DisableInfo{
+				Reason: "could not clean up processes/Docker artifacts after task is finished",
+			}); disableErr != nil {
+				tc.logger.Execution().Criticalf("Unable to disable unhealthy host that has leftover processes/Docker artifacts. Error: %s", disableErr.Error())
+			}
+		}
+	}()
 
 	grip.Info(message.Fields{
 		"message": "running task",
@@ -767,14 +764,19 @@ func (a *Agent) runPreAndMain(ctx context.Context, tc *taskContext) (status stri
 		tc.setHeartbeatTimeout(heartbeatTimeoutOptions{})
 	}()
 
-	// set up the system stats collector
+	// Set up the system stats collector.
+	statsCmds := []string{"uptime", "df -h"}
+
+	// Add ps command if configured in YAML or expansion (for backward compatibility) when default ps logging is not disabled.
+	if psCmd := tc.getPSCommand(); psCmd != "" {
+		statsCmds = append(statsCmds, psCmd)
+	}
+
 	statsCollector := NewSimpleStatsCollector(
 		tc.logger,
 		a.jasper,
 		globals.DefaultStatsInterval,
-		"uptime",
-		"df -h",
-		"${ps|ps}",
+		statsCmds...,
 	)
 	// Running the `df` command on Unix systems displays inode
 	// statistics without the `-i` flag by default. However, we need
@@ -808,7 +810,7 @@ func (a *Agent) runPreAndMain(ctx context.Context, tc *taskContext) (status stri
 		return evergreen.TaskSystemFailed
 	}
 
-	a.killProcs(execTimeoutCtx, tc, false, "task is starting")
+	_ = a.killProcs(execTimeoutCtx, tc, false, "task is starting")
 
 	if err := a.runPreTaskCommands(execTimeoutCtx, tc); err != nil {
 		return evergreen.TaskFailed
@@ -910,6 +912,109 @@ func (a *Agent) runTaskTimeoutCommands(ctx context.Context, tc *taskContext) {
 	}
 }
 
+// runDefaultTimeoutHandler extracts and logs PIDs of running processes when a task times out.
+func (a *Agent) runDefaultTimeoutHandler(ctx context.Context, tc *taskContext, detail *apimodels.TaskEndDetail) {
+	tc.logger.Execution().Info("Running default timeout handler to collect process information.")
+
+	var currentCmdPID int
+	var currentCmdName string
+	if currentCmd := tc.getCurrentCommand(); currentCmd != nil {
+		currentCmdName = currentCmd.FullDisplayName()
+		tc.logger.Execution().Infof("Current command at timeout: %s", currentCmdName)
+	}
+
+	var runningPIDs []int
+	var processDetails []string
+
+	if a.jasper == nil {
+		return
+	}
+	procs, err := a.jasper.List(ctx, options.Running)
+	if err != nil {
+		tc.logger.Execution().Error(errors.Wrap(err, "listing running processes during timeout"))
+		return
+	}
+	tc.logger.Execution().Infof("Found %d running processes managed by Jasper", len(procs))
+	for _, proc := range procs {
+		info := proc.Info(ctx)
+		if info.PID > 0 {
+			runningPIDs = append(runningPIDs, info.PID)
+
+			detail := fmt.Sprintf("PID %d: ID=%s, Running=%v",
+				info.PID, info.ID, info.IsRunning)
+			if !info.StartAt.IsZero() {
+				detail += fmt.Sprintf(", StartTime=%s", info.StartAt.Format(time.RFC3339))
+				detail += fmt.Sprintf(", RunningFor=%v", time.Since(info.StartAt))
+			}
+			if info.Complete {
+				detail += fmt.Sprintf(", Complete=true, ExitCode=%d", info.ExitCode)
+			}
+			if info.Options.WorkingDirectory != "" {
+				detail += fmt.Sprintf(", WorkingDir=%s", info.Options.WorkingDirectory)
+			}
+			if tags := proc.GetTags(); len(tags) > 0 {
+				detail += fmt.Sprintf(", Tags=%v", tags)
+			}
+			if len(info.Options.Args) > 0 {
+				detail += fmt.Sprintf(", Command Args=%v", info.Options.Args)
+			}
+
+			processDetails = append(processDetails, detail)
+
+			if currentCmdName != "" && info.IsRunning {
+				for _, tag := range proc.GetTags() {
+					if tag == currentCmdName {
+						currentCmdPID = info.PID
+						break
+					}
+				}
+			}
+		}
+	}
+	childPIDs := getDescendantPIDs(ctx, runningPIDs, tc.logger, a.tracer)
+
+	if len(runningPIDs) > 0 {
+		tc.logger.Execution().Infof("Process PIDs at timeout: %v", runningPIDs)
+		tc.logger.Execution().Info("Detailed process information:")
+		for _, detail := range processDetails {
+			tc.logger.Execution().Info(detail)
+		}
+
+		if currentCmdPID > 0 {
+			tc.logger.Execution().Infof("Suspected current command PID: %d", currentCmdPID)
+		}
+
+		if len(childPIDs) > 0 {
+			tc.logger.Execution().Infof("Descendant child PIDs: %v", childPIDs)
+		}
+
+		tc.logger.Task().Infof("Default timeout handler collected %d process PIDs for debugging.", len(runningPIDs))
+	} else {
+		tc.logger.Execution().Info("No running processes found during timeout")
+	}
+	if detail.TimeoutProcessInfo == nil {
+		detail.TimeoutProcessInfo = &apimodels.TimeoutProcessInfo{
+			CurrentCommand:    currentCmdName,
+			CurrentCommandPID: currentCmdPID,
+			RunningPIDs:       runningPIDs,
+			ChildPIDs:         childPIDs,
+			Timestamp:         time.Now(),
+		}
+		pidStrings := make([]string, len(runningPIDs))
+		for i, pid := range runningPIDs {
+			pidStrings[i] = strconv.Itoa(pid)
+		}
+		delimitedPids := strings.Join(pidStrings, ",")
+		childPIDStrings := make([]string, len(childPIDs))
+		for i, pid := range childPIDs {
+			childPIDStrings[i] = strconv.Itoa(pid)
+		}
+		tc.taskConfig.NewExpansions.Put("timed_out_command_pid", strconv.Itoa(currentCmdPID))
+		tc.taskConfig.NewExpansions.Put("timed_out_pids", delimitedPids)
+		tc.taskConfig.NewExpansions.Put("timed_out_child_pids", strings.Join(childPIDStrings, ","))
+	}
+}
+
 func (a *Agent) runPostOrTeardownTaskCommands(ctx context.Context, tc *taskContext) error {
 	// We run the command cleanups in a defer in case any of the post commands add cleanups.
 	// This will clean up anything added from commands running in pre, main, or post or the
@@ -921,8 +1026,10 @@ func (a *Agent) runPostOrTeardownTaskCommands(ctx context.Context, tc *taskConte
 	ctx, span := a.tracer.Start(ctx, "post-task-commands")
 	defer span.End()
 
-	a.killProcs(ctx, tc, false, "post-task or teardown-task commands are starting")
-	defer a.killProcs(ctx, tc, false, "post-task or teardown-task commands are finished")
+	_ = a.killProcs(ctx, tc, false, "post-task or teardown-task commands are starting")
+	defer func() {
+		_ = a.killProcs(ctx, tc, false, "post-task or teardown-task commands are finished")
+	}()
 
 	post, err := tc.getPost()
 	if err != nil {
@@ -947,7 +1054,9 @@ func (a *Agent) runTeardownGroupCommands(ctx context.Context, tc *taskContext) {
 	// Only killProcs if tc.taskConfig is not nil. This avoids passing an
 	// empty working directory to killProcs, and is okay because this
 	// killProcs is only for the processes run in runTeardownGroupCommands.
-	defer a.killProcs(ctx, tc, true, "teardown group commands are finished")
+	defer func() {
+		_ = a.killProcs(ctx, tc, true, "teardown group commands are finished")
+	}()
 
 	defer func() {
 		if tc.logger != nil {
@@ -958,6 +1067,9 @@ func (a *Agent) runTeardownGroupCommands(ctx context.Context, tc *taskContext) {
 			cancel()
 			grip.Error(tc.logger.Close())
 		}
+		// Report S3 usage after the final flush so all log chunks and artifacts
+		// (including those from teardown group commands) are captured.
+		grip.Error(errors.Wrap(a.comm.ReportS3Usage(ctx, tc.task, tc.s3Usage), "reporting S3 usage"))
 	}()
 	defer a.clearGlobalFiles(tc)
 
@@ -970,7 +1082,7 @@ func (a *Agent) runTeardownGroupCommands(ctx context.Context, tc *taskContext) {
 	}
 
 	if teardownGroup.commands != nil {
-		a.killProcs(ctx, tc, true, "teardown group commands are starting")
+		_ = a.killProcs(ctx, tc, true, "teardown group commands are starting")
 		ctx = utility.ContextWithAttributes(ctx, tc.taskConfig.TaskAttributes())
 		ctx, span := a.tracer.Start(ctx, "teardown_group")
 		defer span.End()
@@ -1028,6 +1140,9 @@ func (a *Agent) handleTimeoutAndOOM(ctx context.Context, tc *taskContext, detail
 // such as timeout and post, then sends the final end task response.
 func (a *Agent) finishTask(ctx context.Context, tc *taskContext, status string, systemFailureDescription string) (*apimodels.EndTaskResponse, error) {
 	detail := a.endTaskResponse(ctx, tc, status, systemFailureDescription)
+	if detail.TimedOut {
+		a.runDefaultTimeoutHandler(ctx, tc, detail)
+	}
 	switch detail.Status {
 	case evergreen.TaskSucceeded:
 		a.handleTimeoutAndOOM(ctx, tc, detail, status)
@@ -1090,7 +1205,7 @@ func (a *Agent) finishTask(ctx context.Context, tc *taskContext, status string, 
 		span.End()
 	}
 
-	a.killProcs(ctx, tc, false, "task is ending")
+	_ = a.killProcs(ctx, tc, false, "task is ending")
 
 	if tc.logger != nil {
 		tc.logger.Execution().Infof("Sending final task status: '%s'.", detail.Status)
@@ -1359,21 +1474,23 @@ func updateEndTaskFailureDetailsForTestResults(tc *taskContext, detail *apimodel
 	}
 }
 
-func (a *Agent) killProcs(ctx context.Context, tc *taskContext, ignoreTaskGroupCheck bool, reason string) {
+func (a *Agent) killProcs(ctx context.Context, tc *taskContext, ignoreTaskGroupCheck bool, reason string) error {
 	logger := grip.NewJournaler("killProcs")
 	if tc.logger != nil && !tc.logger.Closed() {
 		logger = tc.logger.Execution()
 	}
 
 	if !a.shouldKill(tc, ignoreTaskGroupCheck) {
-		return
+		return nil
 	}
 
 	logger.Infof("Cleaning up task because %s", reason)
 
+	catcher := grip.NewBasicCatcher()
 	if tc.task.ID != "" && tc.taskConfig != nil && tc.taskConfig.Distro != nil {
 		logger.Infof("Cleaning up processes for task: '%s'.", tc.task.ID)
 		if err := agentutil.KillSpawnedProcs(ctx, tc.task.ID, tc.taskConfig.WorkDir, tc.taskConfig.Distro.ExecUser, logger); err != nil {
+			catcher.Wrap(err, "cleaning up spawned processes")
 			// If the host is in a state where ps is timing out we need human intervention.
 			if psErr := errors.Cause(err); psErr == agentutil.ErrPSTimeout {
 				disableErr := a.comm.DisableHost(ctx, a.opts.HostID, apimodels.DisableInfo{Reason: psErr.Error()})
@@ -1384,18 +1501,16 @@ func (a *Agent) killProcs(ctx context.Context, tc *taskContext, ignoreTaskGroupC
 		logger.Infof("Cleaned up processes for task: '%s'.", tc.task.ID)
 	}
 
-	// Agents running in containers don't have Docker available, so skip
-	// Docker cleanup for them.
-	if a.opts.Mode != globals.PodMode {
-		logger.Info("Cleaning up Docker artifacts.")
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, globals.DockerTimeout)
-		defer cancel()
-		if err := docker.Cleanup(ctx, logger); err != nil {
-			logger.Critical(errors.Wrap(err, "cleaning up Docker artifacts"))
-		}
-		logger.Info("Cleaned up Docker artifacts.")
+	logger.Info("Cleaning up Docker artifacts.")
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, globals.DockerTimeout)
+	defer cancel()
+	if err := docker.Cleanup(ctx, logger); err != nil {
+		catcher.Wrap(err, "cleaning up Docker artifacts")
+		logger.Critical(errors.Wrap(err, "cleaning up Docker artifacts"))
 	}
+	logger.Info("Cleaned up Docker artifacts.")
+	return catcher.Resolve()
 }
 
 // clearGlobalFiles cleans up certain files that were created in the home directory, including
@@ -1461,4 +1576,78 @@ func (a *Agent) logPanic(tc *taskContext, pErr, originalErr error, op string) er
 	grip.Alert(message.WrapError(errors.WithStack(pErr), logMsg))
 
 	return catcher.Resolve()
+}
+
+const maxDescendantDepth = 10
+
+// getDescendantPIDs returns all descendant PIDs of the given parent PIDs
+// by recursively calling pgrep -P. This operation will no-op on windows architectures.
+func getDescendantPIDs(ctx context.Context, parentPIDs []int, logger client.LoggerProducer, tracer trace.Tracer) []int {
+	if runtime.GOOS == "windows" || len(parentPIDs) == 0 {
+		return nil
+	}
+
+	ctx, span := tracer.Start(ctx, "get-descendant-pids")
+	defer span.End()
+
+	seen := make(map[int]bool)
+	var result []int
+	parentPIDsToSearch := make([]int, len(parentPIDs))
+	copy(parentPIDsToSearch, parentPIDs)
+	for _, pid := range parentPIDs {
+		seen[pid] = true
+	}
+
+	for depth := 0; depth < maxDescendantDepth && len(parentPIDsToSearch) > 0; depth++ {
+		var nextParentPIDsToSearch []int
+		for _, pid := range parentPIDsToSearch {
+			children := pgrepChildren(ctx, pid, logger)
+			for _, child := range children {
+				if !seen[child] {
+					seen[child] = true
+					result = append(result, child)
+					nextParentPIDsToSearch = append(nextParentPIDsToSearch, child)
+				}
+			}
+		}
+		parentPIDsToSearch = nextParentPIDsToSearch
+	}
+
+	span.SetAttributes(
+		attribute.Int("num_parent_pids", len(parentPIDs)),
+		attribute.Int("num_descendants_found", len(result)),
+	)
+
+	return result
+}
+
+// pgrepChildren returns the direct child PIDs of the given parent PID.
+func pgrepChildren(ctx context.Context, parentPID int, logger client.LoggerProducer) []int {
+	// PID 0 is the kernel scheduler, and negative PIDs are invalid.
+	if parentPID <= 0 {
+		return nil
+	}
+
+	cmd := exec.CommandContext(ctx, "pgrep", "-P", strconv.Itoa(parentPID))
+	out, err := cmd.Output()
+	if err != nil {
+		logger.Execution().Warningf("pgrep -P %d failed: %s", parentPID, err.Error())
+		return nil
+	}
+
+	var pids []int
+	// pgrep outputs one PID per line, each line containing just a numeric PID.
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			logger.Execution().Warningf("unexpected pgrep output line for parent PID %d: %s", parentPID, line)
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids
 }

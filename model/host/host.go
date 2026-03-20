@@ -330,6 +330,10 @@ type ProvisionOptions struct {
 	// UseOAuth indicates whether to run `evergreen fetch` with static credentials (legacy)
 	// or whether to write the command to a file, and have the user run `evergreen host fetch` (OAuth).
 	UseOAuth bool `bson:"use_oauth" json:"use_oauth"`
+
+	// SetupStepNumber, if set, indicates the step number that the debug host
+	// should run until after initializing the daemon. Accepts step notation (e.g., "5" or "5.1")
+	SetupStepNumber string `bson:"setup_step_number,omitempty" json:"setup_step_number,omitempty"`
 }
 
 // SpawnOptions holds data which the monitor uses to determine when to terminate hosts spawned by tasks.
@@ -2367,7 +2371,7 @@ func buildConditionalProvisioningTimeoutQuery(now time.Time, timeoutCondition bs
 					// agent or 2. failed to prove the agent's
 					// liveliness by continuously pinging the app server
 					// with requests.
-					"$or": []bson.M{
+					"$and": []bson.M{
 						{RunningTaskKey: bson.M{"$exists": false}},
 						{LTCTaskKey: ""},
 					},
@@ -2740,6 +2744,61 @@ func FindHostsSpawnedByTask(ctx context.Context, taskID string, execution int, s
 		return nil, errors.Wrapf(err, "finding hosts spawned by task '%s' for execution %d", taskID, execution)
 	}
 	return hosts, nil
+}
+
+// FindTerminatableDebugHostsForProject finds all debug hosts associated with a project that are eligible for termination.
+func FindTerminatableDebugHostsForProject(ctx context.Context, projectId string) ([]Host, error) {
+	if projectId == "" {
+		return nil, errors.New("project ID cannot be empty")
+	}
+
+	taskIdKey := bsonutil.GetDottedKeyName(ProvisionOptionsKey, ProvisionOptionsTaskIdKey)
+	query := bson.M{
+		IsDebugKey:  true,
+		UserHostKey: true,
+		StatusKey:   bson.M{"$in": evergreen.StoppableHostStatuses},
+		taskIdKey:   bson.M{"$exists": true, "$ne": ""},
+	}
+
+	hosts, err := Find(ctx, query)
+	if err != nil {
+		return nil, errors.Wrap(err, "finding debug hosts")
+	}
+
+	// Filter hosts by project in application code.
+	// The nil check is necessary because MongoDB may return hosts where the struct field is nil
+	// even if the database field exists.
+	var debugHostsForProject []Host
+	for _, h := range hosts {
+		if h.ProvisionOptions == nil || h.ProvisionOptions.TaskId == "" {
+			continue
+		}
+
+		t, err := task.FindOneId(ctx, h.ProvisionOptions.TaskId)
+		if err != nil {
+			grip.Warning(message.WrapError(err, message.Fields{
+				"message": "problem finding task for debug host",
+				"host_id": h.Id,
+				"task_id": h.ProvisionOptions.TaskId,
+			}))
+			continue
+		}
+		if t == nil {
+			grip.Warning(message.Fields{
+				"message": "task not found for debug host",
+				"host_id": h.Id,
+				"task_id": h.ProvisionOptions.TaskId,
+			})
+			continue
+		}
+
+		// Check if task belongs to the target project.
+		if t.Project == projectId {
+			debugHostsForProject = append(debugHostsForProject, h)
+		}
+	}
+
+	return debugHostsForProject, nil
 }
 
 // FindHostsSpawnedByBuild finds hosts spawned by the `createhost` command scoped to a given build.

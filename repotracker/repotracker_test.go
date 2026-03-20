@@ -15,6 +15,7 @@ import (
 	"github.com/evergreen-ci/evergreen/model/build"
 	"github.com/evergreen-ci/evergreen/model/distro"
 	"github.com/evergreen-ci/evergreen/model/event"
+	mfst "github.com/evergreen-ci/evergreen/model/manifest"
 	"github.com/evergreen-ci/evergreen/model/patch"
 	"github.com/evergreen-ci/evergreen/model/task"
 	modelutil "github.com/evergreen-ci/evergreen/model/testutil"
@@ -1824,6 +1825,46 @@ func TestCreateManifest(t *testing.T) {
 	}
 	_, err = model.CreateManifest(t.Context(), &v, proj.Modules, projRef)
 	assert.Contains(err.Error(), "No commit found for SHA")
+
+	// patch with module ref that differs from base manifest should use YAML ref
+	baseRevision := "b27779f856b211ffaf97cbc124b7082a20ea8bc0"
+	yamlRef := "cf46076567e4949f9fc68e0634139d4ac495c89b"
+	baseManifest := mfst.Manifest{
+		Id:          "aaaaaaaaaaff001122334455",
+		Revision:    patchVersion.Revision,
+		ProjectName: patchVersion.Identifier,
+		Modules: map[string]*mfst.Module{
+			"module1": {
+				Branch:   "main",
+				Repo:     "sample",
+				Owner:    "evergreen-ci",
+				Revision: baseRevision,
+			},
+		},
+		IsBase: true,
+	}
+	_, err = baseManifest.TryInsert(t.Context())
+	require.NoError(t, err)
+
+	proj = model.Project{
+		Identifier: "proj",
+		Modules: []model.Module{
+			{
+				Name:   "module1",
+				Owner:  "evergreen-ci",
+				Repo:   "sample",
+				Branch: "main",
+				Ref:    yamlRef,
+			},
+		},
+	}
+	manifest, err = model.CreateManifest(t.Context(), &patchVersion, proj.Modules, projRef)
+	require.NotNil(t, manifest)
+	assert.Equal(patchVersion.Id, manifest.Id)
+	assert.Len(manifest.Modules, 1)
+	module, ok = manifest.Modules["module1"]
+	require.True(t, ok)
+	assert.Equal(yamlRef, module.Revision, "patch should use YAML ref when it differs from base manifest")
 }
 
 func TestShellVersionFromRevisionGitTags(t *testing.T) {
@@ -1973,6 +2014,8 @@ buildvariants:
   - "shared/**"
   tasks:
   - name: frontend_test
+  - name: special_task
+    activate: true
 - name: backend
   display_name: Backend
   run_on: d
@@ -1983,6 +2026,14 @@ buildvariants:
   - "go.mod"
   tasks:
   - name: backend_test
+- name: frontend-special-cron
+  # this variant is never ignored on mainline due to cron, despite path filtering.
+  cron: 0 0 * * *
+  paths:
+  - "frontend/**"
+  - "shared/**"
+  tasks:
+  - name: frontend_test
 - name: non_docs
   display_name: Non-Documentation
   run_on: d
@@ -2001,6 +2052,7 @@ tasks:
 - name: backend_test
 - name: non_docs_test
 - name: integration_test
+- name: special_task
 `
 
 			projectRef := &model.ProjectRef{
@@ -2039,8 +2091,12 @@ tasks:
 
 			ignoredVariants := []string{}
 			for _, bv := range v.BuildVariants {
-				if bv.Ignored {
+				if utility.IsZeroTime(bv.ActivateAt) { // This should be set if the variant is ignored due to path filtering.
 					ignoredVariants = append(ignoredVariants, bv.BuildVariant)
+					if bv.BuildVariant == "frontend" { // Ensure that the task that overrides activation is given an activation time.
+						require.Len(t, bv.BatchTimeTasks, 1)
+						assert.Equal(t, bv.BatchTimeTasks[0].TaskName, "special_task")
+					}
 				}
 			}
 

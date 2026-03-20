@@ -59,6 +59,7 @@ input AdminSettingsInput {
   amboyDB: AmboyDBConfigInput @redactSecrets
   api: APIConfigInput
   authConfig: AuthConfigInput
+  oktaServiceConfig: OktaServiceConfigInput
   banner: String
   bannerTheme: BannerTheme
   buckets: BucketsConfigInput
@@ -66,6 +67,7 @@ input AdminSettingsInput {
   configDir: String
   containerPools: ContainerPoolsConfigInput
   cost: CostConfigInput
+  debugSpawnHosts: DebugSpawnHostsConfigInput
   disabledGQLQueries: [String!]
   domainName: String
   expansions: StringMap
@@ -79,7 +81,6 @@ input AdminSettingsInput {
   hostJasper: HostJasperConfigInput
   jira: JiraConfigInput
   jiraNotifications: JiraNotificationsConfigInput
-  kanopySSHKeyPath: String @redactSecrets
   logPath: String
   loggerConfig: LoggerConfigInput
   notify: NotifyConfigInput
@@ -87,7 +88,6 @@ input AdminSettingsInput {
   parameterStore: ParameterStoreConfigInput
   perfMonitoringKanopyURL: String
   perfMonitoringURL: String
-  podLifecycle: PodLifecycleConfigInput
   pprofPort: String
   projectCreation: ProjectCreationConfigInput
   providers: CloudProviderConfigInput
@@ -116,6 +116,7 @@ type AdminSettings {
   amboyDB: AmboyDBConfig
   api: APIConfig
   authConfig: AuthConfig
+  oktaServiceConfig: OktaServiceConfig
   banner: String
   bannerTheme: BannerTheme
   buckets: BucketsConfig
@@ -123,6 +124,7 @@ type AdminSettings {
   configDir: String
   containerPools: ContainerPoolsConfig
   cost: CostConfig
+  debugSpawnHosts: DebugSpawnHostsConfig
   disabledGQLQueries: [String!]!
   domainName: String
   expansions: StringMap
@@ -136,7 +138,6 @@ type AdminSettings {
   hostJasper: HostJasperConfig
   jira: JiraConfig
   jiraNotifications: JiraNotificationsConfig
-  kanopySSHKeyPath: String @requireAdmin
   logPath: String
   loggerConfig: LoggerConfig
   notify: NotifyConfig
@@ -144,7 +145,6 @@ type AdminSettings {
   parameterStore: ParameterStoreConfig
   perfMonitoringKanopyURL: String
   perfMonitoringURL: String
-  podLifecycle: PodLifecycleConfig
   pprofPort: String
   projectCreation: ProjectCreationConfig
   providers: CloudProviderConfig
@@ -153,6 +153,7 @@ type AdminSettings {
   runtimeEnvironments: RuntimeEnvironmentConfig
   scheduler: SchedulerConfig
   serviceFlags: ServiceFlags
+  serviceFlagsList: [ServiceFlag!]
   shutdownWaitSeconds: Int
   singleTaskDistro: SingleTaskDistroConfig
   slack: SlackConfig

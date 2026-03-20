@@ -14,7 +14,8 @@ type LogService interface {
 	// Get returns a log iterator with the given options.
 	Get(context.Context, GetOptions) (LogIterator, error)
 	// Append appends given lines to the specified log and sequence chunk.
-	Append(context.Context, string, int, []LogLine) error
+	// Returns the number of bytes written to storage.
+	Append(context.Context, string, int, []LogLine) (int64, error)
 }
 
 // GetOptions represents the arguments for fetching Evergreen logs.

@@ -208,6 +208,7 @@ type TriggerInfo struct {
 	Aliases              []string    `bson:"aliases,omitempty"`
 	ParentPatch          string      `bson:"parent_patch,omitempty"`
 	ParentProjectID      string      `bson:"parent_project_id,omitempty"`
+	ParentAsModule       string      `bson:"parent_as_module,omitempty"`
 	DownstreamRevision   string      `bson:"downstream_revision,omitempty"`
 	SameBranchAsParent   bool        `bson:"same_branch_as_parent"`
 	ChildPatches         []string    `bson:"child_patches,omitempty"`
@@ -237,6 +238,35 @@ type TaskSpecifier struct {
 // status.
 func (p *Patch) IsFinished() bool {
 	return evergreen.IsFinishedVersionStatus(p.Status)
+}
+
+// GetCollectiveTimes returns the collective start and finish times for the
+// patch family (parent + all child patches). For parent patches with children,
+// it returns the earliest start time and latest finish time across all patches.
+// For non-parent patches or parents without children, it returns the patch's own times.
+func (p *Patch) GetCollectiveTimes(ctx context.Context) (startTime, finishTime time.Time, err error) {
+	startTime = p.StartTime
+	finishTime = p.FinishTime
+
+	if !p.IsParent() || len(p.Triggers.ChildPatches) == 0 {
+		return startTime, finishTime, nil
+	}
+
+	childPatches, err := Find(ctx, ByStringIds(p.Triggers.ChildPatches))
+	if err != nil {
+		return time.Time{}, time.Time{}, errors.Wrap(err, "getting child patches for collective time calculations")
+	}
+
+	for _, childPatch := range childPatches {
+		if !childPatch.StartTime.IsZero() && (startTime.IsZero() || childPatch.StartTime.Before(startTime)) {
+			startTime = childPatch.StartTime
+		}
+		if !childPatch.FinishTime.IsZero() && childPatch.FinishTime.After(finishTime) {
+			finishTime = childPatch.FinishTime
+		}
+	}
+
+	return startTime, finishTime, nil
 }
 
 // SetDescription sets a patch's description in the database
@@ -714,9 +744,9 @@ func (p *Patch) IsParent() bool {
 }
 
 // ShouldPatchFileWithDiff returns true if the patch should read with diff
-// (i.e. is not a PR patch) and the config has changed.
+// (i.e. is not a GitHub patch) and the config has changed.
 func (p *Patch) ShouldPatchFileWithDiff(path string) bool {
-	return !p.IsGithubPRPatch() && p.ConfigChanged(path)
+	return !p.IsGithubPRPatch() && !p.IsMergeQueuePatch() && p.ConfigChanged(path)
 }
 
 func (p *Patch) GetPatchIndex(parentPatch *Patch) (int, error) {

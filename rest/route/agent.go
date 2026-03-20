@@ -19,7 +19,8 @@ import (
 	"github.com/evergreen-ci/evergreen/model/host"
 	"github.com/evergreen-ci/evergreen/model/manifest"
 	"github.com/evergreen-ci/evergreen/model/patch"
-	"github.com/evergreen-ci/evergreen/model/pod"
+	"github.com/evergreen-ci/evergreen/model/s3lifecycle"
+	"github.com/evergreen-ci/evergreen/model/s3usage"
 	"github.com/evergreen-ci/evergreen/model/task"
 	"github.com/evergreen-ci/evergreen/model/testlog"
 	"github.com/evergreen-ci/evergreen/model/testresult"
@@ -30,6 +31,7 @@ import (
 	"github.com/mongodb/grip"
 	"github.com/mongodb/grip/message"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // GET /rest/v2/agent/perf_monitoring_url
@@ -83,6 +85,7 @@ func (h *agentSetup) Run(ctx context.Context) gimlet.Responder {
 		SplunkChannel:      h.settings.Splunk.SplunkConnectionInfo.Channel,
 		TaskOutput:         h.settings.Buckets.Credentials,
 		MaxExecTimeoutSecs: h.settings.TaskLimits.MaxExecTimeoutSecs,
+		PSLoggingDisabled:  h.settings.ServiceFlags.PSLoggingDisabled,
 	}
 
 	if h.settings.Tracer.Enabled {
@@ -317,8 +320,8 @@ func (h *getExpansionsAndVarsHandler) Parse(ctx context.Context, r *http.Request
 		return errors.New("missing task ID")
 	}
 	h.hostID = r.Header.Get(evergreen.HostHeader)
-	podID := r.Header.Get(evergreen.PodHeader)
-	if h.hostID == "" && podID == "" {
+	userKey := r.Header.Get(evergreen.AuthorizationHeader)
+	if h.hostID == "" && userKey == "" {
 		return errors.New("missing both host and pod ID")
 	}
 	return nil
@@ -392,6 +395,23 @@ func (h *getExpansionsAndVarsHandler) Run(ctx context.Context) gimlet.Responder 
 		if projectVars.PrivateVars != nil {
 			res.PrivateVars = projectVars.PrivateVars
 		}
+
+		user := gimlet.GetUser(ctx)
+		isUserRequest := user != nil
+		// If from debug session request, filter out admin-only vars if user is not an admin
+		isAdmin := isUserRequest && user.HasPermission(ctx, gimlet.PermissionOpts{
+			Resource:      pRef.Id,
+			ResourceType:  evergreen.ProjectResourceType,
+			Permission:    evergreen.PermissionProjectSettings,
+			RequiredLevel: evergreen.ProjectSettingsEdit.Value,
+		})
+		if isUserRequest && projectVars.AdminOnlyVars != nil && !isAdmin {
+			for adminOnlyVar := range projectVars.AdminOnlyVars {
+				if projectVars.AdminOnlyVars[adminOnlyVar] {
+					delete(res.Vars, adminOnlyVar)
+				}
+			}
+		}
 	}
 
 	v, err := model.VersionFindOne(ctx, model.VersionById(t.Version).WithFields(model.VersionParametersKey))
@@ -454,6 +474,21 @@ func (h *getProjectRefHandler) Run(ctx context.Context) gimlet.Responder {
 			StatusCode: http.StatusNotFound,
 			Message:    fmt.Sprintf("project ref '%s' not found", t.Project),
 		})
+	}
+	user := gimlet.GetUser(ctx)
+	isUserRequest := user != nil
+	// If from debug session request, return minimal response
+	if isUserRequest {
+		redactedProjectRef := map[string]interface{}{
+			"repo_name":      p.Repo,
+			"branch_name":    p.Branch,
+			"owner_name":     p.Owner,
+			"id":             p.Id,
+			"repo_ref_id":    p.RepoRefId,
+			"identifier":     p.Identifier,
+			"test_selection": p.TestSelection,
+		}
+		return gimlet.NewJSONResponse(redactedProjectRef)
 	}
 
 	return gimlet.NewJSONResponse(p)
@@ -638,6 +673,8 @@ func (h *attachFilesHandler) Run(ctx context.Context) gimlet.Responder {
 		})
 	}
 
+	discoverAndCacheBucketLifecycleRules(ctx, t, h.files)
+
 	entry := &artifact.Entry{
 		TaskId:          t.Id,
 		TaskDisplayName: t.DisplayName,
@@ -653,6 +690,126 @@ func (h *attachFilesHandler) Run(ctx context.Context) gimlet.Responder {
 		return gimlet.MakeJSONInternalErrorResponder(errors.New(message))
 	}
 	return gimlet.NewJSONResponse(fmt.Sprintf("Artifact files for task %s successfully attached", t.Id))
+}
+
+// discoverAndCacheBucketLifecycleRules will look at all the buckets that the files are being uploaded
+// to and check if we have lifecycle rules cached for them. If not, it will attempt to discover
+// and cache them. This is best-effort and will not fail the file upload if discovery fails.
+func discoverAndCacheBucketLifecycleRules(ctx context.Context, t *task.Task, files []artifact.File) {
+	bucketsToDiscover := make(map[string]*artifact.File)
+	for i := range files {
+		file := &files[i]
+		if file.Bucket == "" {
+			continue
+		}
+
+		if _, exists := bucketsToDiscover[file.Bucket]; !exists {
+			bucketsToDiscover[file.Bucket] = file
+		}
+	}
+
+	cachedBuckets := []string{}
+	for bucketName, file := range bucketsToDiscover {
+		region := evergreen.DefaultS3Region
+
+		var roleARN *string
+		if file.AWSRoleARN != "" {
+			roleARN = &file.AWSRoleARN
+		}
+
+		var externalID *string
+		if file.ExternalID != "" {
+			externalID = &file.ExternalID
+		}
+
+		wasCached := s3lifecycle.DiscoverAndCacheProjectBucket(ctx, bucketName, region, roleARN, externalID, t.Project, cloud.NewS3LifecycleClient())
+		if wasCached {
+			cachedBuckets = append(cachedBuckets, bucketName)
+		}
+	}
+
+	if len(cachedBuckets) > 0 {
+		grip.Info(message.Fields{
+			"message":    "successfully cached bucket lifecycle rules",
+			"buckets":    cachedBuckets,
+			"task_id":    t.Id,
+			"project":    t.Project,
+			"num_cached": len(cachedBuckets),
+		})
+	}
+}
+
+// POST /rest/v2/task/{task_id}/s3_usage
+type reportS3UsageHandler struct {
+	taskID  string
+	s3Usage s3usage.S3Usage
+}
+
+func makeReportS3Usage() gimlet.RouteHandler {
+	return &reportS3UsageHandler{}
+}
+
+func (h *reportS3UsageHandler) Factory() gimlet.RouteHandler {
+	return &reportS3UsageHandler{}
+}
+
+func (h *reportS3UsageHandler) Parse(ctx context.Context, r *http.Request) error {
+	if h.taskID = gimlet.GetVars(r)["task_id"]; h.taskID == "" {
+		return errors.New("missing task ID")
+	}
+	if err := utility.ReadJSON(r.Body, &h.s3Usage); err != nil {
+		return errors.Wrapf(err, "reading S3 usage for task '%s'", h.taskID)
+	}
+	return nil
+}
+
+func (h *reportS3UsageHandler) Run(ctx context.Context) gimlet.Responder {
+	ctx, span := tracer.Start(ctx, evergreen.S3CostTrackingOtelSpanName)
+	defer span.End()
+
+	t, err := task.FindOneId(ctx, h.taskID)
+	if err != nil {
+		return gimlet.MakeJSONInternalErrorResponder(errors.Wrapf(err, "finding task '%s'", h.taskID))
+	}
+	if t == nil {
+		return gimlet.MakeJSONErrorResponder(gimlet.ErrorResponse{
+			StatusCode: http.StatusNotFound,
+			Message:    fmt.Sprintf("task '%s' not found", h.taskID),
+		})
+	}
+
+	t.S3Usage = h.s3Usage
+	if err := t.SaveS3Usage(ctx); err != nil {
+		grip.Warning(message.WrapError(err, message.Fields{
+			"message": "saving S3 usage",
+			"task_id": h.taskID,
+		}))
+		return gimlet.MakeJSONInternalErrorResponder(errors.Wrapf(err, "saving S3 usage for task '%s'", h.taskID))
+	}
+
+	s3Attrs := []attribute.KeyValue{
+		attribute.String(evergreen.TaskIDOtelAttribute, t.Id),
+		attribute.Int(evergreen.S3ArtifactPutRequestsOtelAttribute, t.S3Usage.Artifacts.PutRequests),
+		attribute.Int64(evergreen.S3ArtifactUploadBytesOtelAttribute, t.S3Usage.Artifacts.UploadBytes),
+		attribute.Int(evergreen.S3ArtifactCountOtelAttribute, t.S3Usage.Artifacts.Count),
+		attribute.Float64(evergreen.S3ArtifactPutCostOtelAttribute, t.TaskCost.S3ArtifactPutCost),
+		attribute.Int(evergreen.S3LogPutRequestsOtelAttribute, t.S3Usage.Logs.PutRequests),
+		attribute.Int64(evergreen.S3LogUploadBytesOtelAttribute, t.S3Usage.Logs.UploadBytes),
+		attribute.Float64(evergreen.S3LogPutCostOtelAttribute, t.TaskCost.S3LogPutCost),
+	}
+
+	if t.S3Usage.Artifacts.Count > 0 && t.S3Usage.Artifacts.PutRequests > 0 {
+		costPerPut := t.TaskCost.S3ArtifactPutCost / float64(t.S3Usage.Artifacts.PutRequests)
+		s3Attrs = append(s3Attrs,
+			attribute.Float64(evergreen.S3ArtifactAvgFilePutCostOtelAttribute, t.TaskCost.S3ArtifactPutCost/float64(t.S3Usage.Artifacts.Count)),
+			attribute.Float64(evergreen.S3ArtifactWithMaxPutRequestsCostOtelAttribute, costPerPut*float64(t.S3Usage.Artifacts.ArtifactWithMaxPutRequests)),
+			attribute.Float64(evergreen.S3ArtifactWithMinPutRequestsCostOtelAttribute, costPerPut*float64(t.S3Usage.Artifacts.ArtifactWithMinPutRequests)),
+		)
+	}
+
+	span.SetAttributes(s3Attrs...)
+
+	return gimlet.NewJSONResponse(struct{}{})
 }
 
 // POST /rest/v2/task/{task_id}/set_results_info
@@ -915,6 +1072,12 @@ func (h *fetchTaskHandler) Run(ctx context.Context) gimlet.Responder {
 			Message:    fmt.Sprintf("task '%s' not found", h.taskID),
 		})
 	}
+	// Remove secret if request is coming from debug session
+	user := gimlet.GetUser(ctx)
+	isUserRequest := user != nil
+	if isUserRequest {
+		t.Secret = ""
+	}
 	return gimlet.NewJSONResponse(t)
 }
 
@@ -923,7 +1086,6 @@ type startTaskHandler struct {
 	env           evergreen.Environment
 	taskID        string
 	hostID        string
-	podID         string
 	taskStartInfo apimodels.TaskStartRequest
 }
 
@@ -947,9 +1109,8 @@ func (h *startTaskHandler) Parse(ctx context.Context, r *http.Request) error {
 		return errors.Wrapf(err, "reading task start request for %s", h.taskID)
 	}
 	h.hostID = r.Header.Get(evergreen.HostHeader)
-	h.podID = r.Header.Get(evergreen.PodHeader)
-	if h.hostID == "" && h.podID == "" {
-		return errors.New("missing both host and pod ID")
+	if h.hostID == "" {
+		return errors.New("missing host ID")
 	}
 	return nil
 }
@@ -997,7 +1158,6 @@ func (h *startTaskHandler) Run(ctx context.Context) gimlet.Responder {
 
 	var msg string
 	var foundHost *host.Host
-	var foundPod *pod.Pod
 	if h.hostID != "" {
 		foundHost, err = host.FindOneByTaskIdAndExecution(ctx, t.Id, t.Execution)
 		if err != nil {
@@ -1028,29 +1188,12 @@ func (h *startTaskHandler) Run(ctx context.Context) gimlet.Responder {
 			}
 			grip.Info(foundHost.TaskStartMessage())
 		}
-	} else {
-		foundPod, err = pod.FindOneByID(ctx, h.podID)
-		if err != nil {
-			return gimlet.MakeJSONInternalErrorResponder(errors.Wrapf(err, "finding pod running task %s", t.Id))
-		}
-		if foundPod == nil {
-			message := fmt.Sprintf("no pod found running task %s", t.Id)
-			if t.PodID != "" {
-				message = fmt.Sprintf("no pod found running task %s but task is said to be running on %s",
-					t.Id, t.PodID)
-			}
-			return gimlet.MakeJSONErrorResponder(gimlet.ErrorResponse{
-				StatusCode: http.StatusNotFound,
-				Message:    message,
-			})
-		}
-		msg = fmt.Sprintf("task '%s' started on pod '%s'", t.Id, h.podID)
 	}
-	logTaskStartMessage(foundHost, foundPod, t)
+	logTaskStartMessage(foundHost, t)
 	return gimlet.NewJSONResponse(msg)
 }
 
-func logTaskStartMessage(h *host.Host, p *pod.Pod, t *task.Task) {
+func logTaskStartMessage(h *host.Host, t *task.Task) {
 	msg := message.Fields{
 		"stat":                   "task-start-stats",
 		"task_id":                t.Id,
@@ -1095,9 +1238,6 @@ func logTaskStartMessage(h *host.Host, p *pod.Pod, t *task.Task) {
 				msg["host_provision_time"] = h.TotalIdleTime.Seconds()
 			}
 		}
-	} else if p != nil {
-		msg["pod_id"] = p.ID
-		msg["pod_provision_time"] = time.Since(p.TimeInfo.Starting).Seconds()
 	}
 	grip.Info(msg)
 }
@@ -1564,9 +1704,14 @@ func (h *checkRunHandler) Run(ctx context.Context) gimlet.Responder {
 		})
 	}
 
+	// Get the project's GitHub app auth for check run operations.
+	// If this fails or the project doesn't have a GitHub app configured,
+	// the check run functions will fall back to using the internal app.
+	ghAppAuth := model.GetGitHubAppAuthForProject(ctx, t.Project)
+
 	gh := p.GithubPatchData
 	if t.CheckRunId != nil {
-		_, err := thirdparty.UpdateCheckRun(ctx, gh.BaseOwner, gh.BaseRepo, env.Settings().Api.URL, utility.FromInt64Ptr(t.CheckRunId), t, h.checkRunOutput)
+		_, err := thirdparty.UpdateCheckRun(ctx, gh.BaseOwner, gh.BaseRepo, env.Settings().Api.URL, utility.FromInt64Ptr(t.CheckRunId), t, h.checkRunOutput, ghAppAuth)
 		if err != nil {
 			errorMessage := fmt.Sprintf("updating checkRun for task: '%s'", t.Id)
 			grip.Error(message.Fields{
@@ -1580,7 +1725,7 @@ func (h *checkRunHandler) Run(ctx context.Context) gimlet.Responder {
 		return gimlet.NewJSONResponse(fmt.Sprintf("Successfully updated check run for  '%v'", t.Id))
 	}
 
-	checkRun, err := thirdparty.CreateCheckRun(ctx, gh.BaseOwner, gh.BaseRepo, gh.HeadHash, env.Settings().Api.URL, t, h.checkRunOutput)
+	checkRun, err := thirdparty.CreateCheckRun(ctx, gh.BaseOwner, gh.BaseRepo, gh.HeadHash, env.Settings().Api.URL, t, h.checkRunOutput, ghAppAuth)
 
 	if err != nil {
 		errorMessage := fmt.Sprintf("creating checkRun for task: '%s'", t.Id)
@@ -1698,7 +1843,15 @@ func (h *createGitHubDynamicAccessToken) Run(ctx context.Context) gimlet.Respond
 			Message:    fmt.Sprintf("project ref '%s' not found", t.Project),
 		})
 	}
-	requesterPermissionGroup, _ := p.GetGitHubPermissionGroup(t.Requester)
+	requester := t.Requester
+	user := gimlet.GetUser(ctx)
+	isUserRequest := user != nil
+	// If the request is coming from a user request, then this route must be being
+	// used in debug mode.
+	if isUserRequest {
+		requester = evergreen.DebugRequester
+	}
+	requesterPermissionGroup, _ := p.GetGitHubPermissionGroup(requester)
 	// If the requester has no permissions, they should not be able to create a token.
 	// GitHub interprets an empty token as having all permissions.
 	if requesterPermissionGroup.HasNoPermissions() {

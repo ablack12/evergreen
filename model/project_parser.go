@@ -88,6 +88,7 @@ type ParserProject struct {
 	PreErrorFailsTask  *bool                      `yaml:"pre_error_fails_task,omitempty" bson:"pre_error_fails_task,omitempty"`
 	PostErrorFailsTask *bool                      `yaml:"post_error_fails_task,omitempty" bson:"post_error_fails_task,omitempty"`
 	OomTracker         *bool                      `yaml:"oom_tracker,omitempty" bson:"oom_tracker,omitempty"`
+	Ps                 *string                    `yaml:"ps,omitempty" bson:"ps,omitempty"`
 	Owner              *string                    `yaml:"owner,omitempty" bson:"owner,omitempty"`
 	Repo               *string                    `yaml:"repo,omitempty" bson:"repo,omitempty"`
 	RemotePath         *string                    `yaml:"remote_path,omitempty" bson:"remote_path,omitempty"`
@@ -102,7 +103,6 @@ type ParserProject struct {
 	Timeout            *YAMLCommandSet            `yaml:"timeout,omitempty" bson:"timeout,omitempty"`
 	CallbackTimeout    *int                       `yaml:"callback_timeout_secs,omitempty" bson:"callback_timeout_secs,omitempty"`
 	Modules            []Module                   `yaml:"modules,omitempty" bson:"modules,omitempty"`
-	Containers         []Container                `yaml:"containers,omitempty" bson:"containers,omitempty"`
 	BuildVariants      []parserBV                 `yaml:"buildvariants,omitempty" bson:"buildvariants,omitempty"`
 	Functions          map[string]*YAMLCommandSet `yaml:"functions,omitempty" bson:"functions,omitempty"`
 	TaskGroups         []parserTaskGroup          `yaml:"task_groups,omitempty" bson:"task_groups,omitempty"`
@@ -110,6 +110,9 @@ type ParserProject struct {
 	ExecTimeoutSecs    *int                       `yaml:"exec_timeout_secs,omitempty" bson:"exec_timeout_secs,omitempty"`
 	TimeoutSecs        *int                       `yaml:"timeout_secs,omitempty" bson:"timeout_secs,omitempty"`
 	CreateTime         time.Time                  `yaml:"create_time,omitempty" bson:"create_time,omitempty"`
+
+	// DisableMergeQueuePathFiltering, if true, skips path filtering for merge queue versions.
+	DisableMergeQueuePathFiltering *bool `yaml:"disable_merge_queue_path_filtering,omitempty" bson:"disable_merge_queue_path_filtering,omitempty"`
 
 	// Matrix code
 	Axes []matrixAxis `yaml:"axes,omitempty" bson:"axes,omitempty"`
@@ -156,6 +159,7 @@ type parserTask struct {
 	AllowedRequesters []evergreen.UserRequester `yaml:"allowed_requesters,omitempty" bson:"allowed_requesters,omitempty"`
 	Stepback          *bool                     `yaml:"stepback,omitempty" bson:"stepback,omitempty"`
 	MustHaveResults   *bool                     `yaml:"must_have_test_results,omitempty" bson:"must_have_test_results,omitempty"`
+	Ps                *string                   `yaml:"ps,omitempty" bson:"ps,omitempty"`
 }
 
 func (pp *ParserProject) Insert(ctx context.Context) error {
@@ -345,6 +349,7 @@ type parserBV struct {
 	GitTagOnly        *bool                     `yaml:"git_tag_only,omitempty" bson:"git_tag_only,omitempty"`
 	AllowedRequesters []evergreen.UserRequester `yaml:"allowed_requesters,omitempty" bson:"allowed_requesters,omitempty"`
 	Paths             parserStringSlice         `yaml:"paths,omitempty" bson:"paths,omitempty"`
+	ExecTimeoutSecs   int                       `yaml:"exec_timeout_secs,omitempty" bson:"exec_timeout_secs,omitempty"`
 
 	// internal matrix stuff
 	MatrixId  string      `yaml:"matrix_id,omitempty" bson:"matrix_id,omitempty"`
@@ -415,6 +420,7 @@ func (pbv *parserBV) canMerge() bool {
 		pbv.GitTagOnly == nil &&
 		len(pbv.AllowedRequesters) == 0 &&
 		len(pbv.Paths) == 0 &&
+		pbv.ExecTimeoutSecs == 0 &&
 		pbv.MatrixId == "" &&
 		pbv.MatrixVal == nil &&
 		pbv.Matrix == nil &&
@@ -430,9 +436,9 @@ type parserBVTaskUnit struct {
 	AllowForGitTag    *bool                     `yaml:"allow_for_git_tag,omitempty" bson:"allow_for_git_tag,omitempty"`
 	GitTagOnly        *bool                     `yaml:"git_tag_only,omitempty" bson:"git_tag_only,omitempty"`
 	AllowedRequesters []evergreen.UserRequester `yaml:"allowed_requesters,omitempty" bson:"allowed_requesters,omitempty"`
+	ExecTimeoutSecs   int                       `yaml:"exec_timeout_secs,omitempty" bson:"exec_timeout_secs,omitempty"`
 	Priority          int64                     `yaml:"priority,omitempty" bson:"priority,omitempty"`
 	DependsOn         parserDependencies        `yaml:"depends_on,omitempty" bson:"depends_on,omitempty"`
-	ExecTimeoutSecs   int                       `yaml:"exec_timeout_secs,omitempty" bson:"exec_timeout_secs,omitempty"`
 	Stepback          *bool                     `yaml:"stepback,omitempty" bson:"stepback,omitempty"`
 	Distros           parserStringSlice         `yaml:"distros,omitempty" bson:"distros,omitempty"`
 	RunOn             parserStringSlice         `yaml:"run_on,omitempty" bson:"run_on,omitempty"` // Alias for "Distros" TODO: deprecate Distros
@@ -445,6 +451,8 @@ type parserBVTaskUnit struct {
 	CronBatchTime string `yaml:"cron,omitempty" bson:"cron,omitempty"`
 	// If Activate is set to false, then we don't initially activate the task.
 	Activate *bool `yaml:"activate,omitempty" bson:"activate,omitempty"`
+	// PS is the command to run for process diagnostics.
+	PS *string `yaml:"ps,omitempty" bson:"ps,omitempty"`
 	// CreateCheckRun will create a check run on GitHub if set.
 	CreateCheckRun *CheckRun `yaml:"create_check_run,omitempty" bson:"create_check_run,omitempty"`
 }
@@ -638,23 +646,28 @@ func GetProjectFromBSON(data []byte) (*Project, error) {
 }
 
 func processIntermediateProjectIncludes(ctx context.Context, identifier string, intermediateProject *ParserProject,
-	include parserInclude, outputYAMLs chan<- yamlTuple, projectOpts *GetProjectOpts) {
+	include parserInclude, outputYAMLs chan<- yamlTuple, projectOpts *GetProjectOpts, dirs *gitIncludeDirs, workerIdx int) {
 	// Make a copy of opts because otherwise parts of opts would be
 	// modified concurrently.  Note, however, that Ref and PatchOpts are
 	// themselves pointers, so should not be modified.
 	localOpts := &GetProjectOpts{
-		Ref:                 projectOpts.Ref,
-		PatchOpts:           projectOpts.PatchOpts,
-		LocalModules:        projectOpts.LocalModules,
-		RemotePath:          include.FileName,
-		Revision:            projectOpts.Revision,
-		ReadFileFrom:        projectOpts.ReadFileFrom,
-		Identifier:          identifier,
-		UnmarshalStrict:     projectOpts.UnmarshalStrict,
-		LocalModuleIncludes: projectOpts.LocalModuleIncludes,
-		ReferencePatchID:    projectOpts.ReferencePatchID,
-		ReferenceManifestID: projectOpts.ReferenceManifestID,
-		IsIncludedFile:      true,
+		Ref:                       projectOpts.Ref,
+		PatchOpts:                 projectOpts.PatchOpts,
+		LocalModules:              projectOpts.LocalModules,
+		RemotePath:                include.FileName,
+		Revision:                  projectOpts.Revision,
+		ReadFileFrom:              projectOpts.ReadFileFrom,
+		Identifier:                identifier,
+		UnmarshalStrict:           projectOpts.UnmarshalStrict,
+		LocalModuleIncludes:       projectOpts.LocalModuleIncludes,
+		ReferencePatchID:          projectOpts.ReferencePatchID,
+		ReferenceManifestID:       projectOpts.ReferenceManifestID,
+		AutoUpdateModuleRevisions: projectOpts.AutoUpdateModuleRevisions,
+		IsIncludedFile:            true,
+		LocalIncludeDir:           projectOpts.LocalIncludeDir,
+	}
+	if projectOpts.Ref != nil {
+		localOpts.Worktree = dirs.getWorktreeForOwnerRepoWorker(projectOpts.Ref.Owner, projectOpts.Ref.Repo, workerIdx)
 	}
 	localOpts.UpdateReadFileFrom(include.FileName)
 
@@ -667,7 +680,7 @@ func processIntermediateProjectIncludes(ctx context.Context, identifier string, 
 		"module":      include.Module,
 	})
 	if include.Module != "" {
-		yaml, err = retrieveFileForModule(ctx, *localOpts, intermediateProject.Modules, include)
+		yaml, err = retrieveFileForModule(ctx, *localOpts, intermediateProject.Modules, include, dirs, workerIdx)
 		err = errors.Wrapf(err, "%s: retrieving file for module '%s'", LoadProjectError, include.Module)
 	} else {
 		yaml, err = retrieveFile(ctx, *localOpts)
@@ -748,6 +761,45 @@ func mergeIncludes(ctx context.Context, projectID string, intermediateProject *P
 		return errors.Wrapf(err, LoadProjectError)
 	}
 
+	// Be polite. Don't make more than 10 concurrent requests to GitHub.
+	const maxWorkers = 10
+	workers := util.Min(maxWorkers, len(intermediateProject.Include))
+
+	dirs, err := setupParallelGitIncludeDirs(ctx, intermediateProject.Modules, intermediateProject.Include, workers, opts)
+	if err != nil {
+		msg := message.Fields{
+			"message":    "could not set up git include directories for includes, will fall back to using GitHub API to retrieve include files",
+			"project_id": projectID,
+			"revision":   opts.Revision,
+		}
+		if opts.Ref != nil {
+			msg["project_identifier"] = opts.Ref.Identifier
+			msg["owner"] = opts.Ref.Owner
+			msg["repo"] = opts.Ref.Repo
+		}
+		grip.Warning(message.WrapError(err, msg))
+	}
+	defer func() {
+		// This is a best-effort attempt to clean up the temporary git
+		// directories after includes are processed. However, if it errors, it's
+		// not really an issue because the git directories don't use much disk
+		// space and app servers are not long-lived enough for a few leftover
+		// files to cause issues.
+		if err := dirs.cleanup(); err != nil {
+			msg := message.Fields{
+				"message":    "could not clean up git directories after including files, may leave behind temporary git files in the file system",
+				"project_id": projectID,
+				"revision":   opts.Revision,
+			}
+			if opts.Ref != nil {
+				msg["project_identifier"] = opts.Ref.Identifier
+				msg["owner"] = opts.Ref.Owner
+				msg["repo"] = opts.Ref.Repo
+			}
+			grip.Warning(message.WrapError(err, msg))
+		}
+	}()
+
 	wg := sync.WaitGroup{}
 	outputYAMLs := make(chan yamlTuple, len(intermediateProject.Include))
 	includesToProcess := make(chan parserInclude, len(intermediateProject.Include))
@@ -757,17 +809,14 @@ func mergeIncludes(ctx context.Context, projectID string, intermediateProject *P
 	}
 	close(includesToProcess)
 
-	// Be polite. Don't make more than 10 concurrent requests to GitHub.
-	const maxWorkers = 10
-	workers := util.Min(maxWorkers, len(intermediateProject.Include))
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
-		go func() {
+		go func(workerIdx int) {
 			defer wg.Done()
 			for include := range includesToProcess {
-				processIntermediateProjectIncludes(ctx, projectID, intermediateProject, include, outputYAMLs, opts)
+				processIntermediateProjectIncludes(ctx, projectID, intermediateProject, include, outputYAMLs, opts, dirs, workerIdx)
 			}
-		}()
+		}(i)
 	}
 
 	// This order is deliberate:
@@ -834,17 +883,31 @@ func newGitOwnerRepo(owner, repo string) gitOwnerRepo {
 	}
 }
 
-// TODO (DEVPROD-26851): use this in follow-up PR.
 func (d *gitIncludeDirs) getWorktreeForOwnerRepoWorker(owner, repo string, workerNum int) string {
+	if d == nil {
+		return ""
+	}
+	if d.worktreesForOwnerRepo == nil {
+		return ""
+	}
+
 	ownerRepo := newGitOwnerRepo(owner, repo)
 	worktrees := d.worktreesForOwnerRepo[ownerRepo]
-	if len(worktrees) < workerNum {
-		// TODO (DEVPROD-26851): if git usage is enabled and this returns an
-		// empty string, that would be a bug. Make sure to add temporary
-		// monitoring to make sure this works as expected.
+	if workerNum >= len(worktrees) {
 		return ""
 	}
 	return worktrees[workerNum]
+}
+
+func (d *gitIncludeDirs) cleanup() error {
+	if d == nil {
+		return nil
+	}
+	catcher := grip.NewBasicCatcher()
+	for ownerRepo, dir := range d.clonesForOwnerRepo {
+		catcher.Wrapf(os.RemoveAll(dir), "cleaning up git clone directory '%s' for '%s/%s'", dir, ownerRepo.owner, ownerRepo.repo)
+	}
+	return catcher.Resolve()
 }
 
 // setupParallelGitIncludeDirs sets up git clones and worktrees in preparation
@@ -857,18 +920,12 @@ func setupParallelGitIncludeDirs(ctx context.Context, modules ModuleList, includ
 	if !readFromRemoteSource(opts.ReadFileFrom) {
 		return nil, nil
 	}
-	flags, err := evergreen.GetServiceFlags(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "getting service flags")
-	}
-	if flags.UseGitForGitHubFilesDisabled {
+	if opts.Ref == nil {
+		// Ref could be nil when the CLI is loading the project for validation.
 		return nil, nil
 	}
-	if opts.Ref == nil {
-		return nil, errors.New("project ref cannot be nil when including files from remote sources")
-	}
 
-	ctx, span := tracer.Start(ctx, "setupGitIncludeDirs", trace.WithAttributes(
+	ctx, span := tracer.Start(ctx, "setupParallelGitIncludeDirs", trace.WithAttributes(
 		attribute.String(evergreen.ProjectIDOtelAttribute, opts.Ref.Id),
 		attribute.String(evergreen.ProjectIdentifierOtelAttribute, opts.Ref.Identifier),
 		attribute.String(evergreen.ProjectOrgOtelAttribute, opts.Ref.Owner),
@@ -887,17 +944,14 @@ func setupParallelGitIncludeDirs(ctx context.Context, modules ModuleList, includ
 		}
 		// If this function errored, clean up any intermediate git clone
 		// directories and worktrees that were created.
-		for ownerRepo, dir := range dirs.clonesForOwnerRepo {
-			grip.Warning(message.WrapError(os.RemoveAll(dir), message.Fields{
-				"message":            "could not clean up git clone directory after failing to set up git directories",
-				"owner":              ownerRepo.owner,
-				"repo":               ownerRepo.repo,
-				"project_id":         opts.Ref.Id,
-				"project_identifier": opts.Ref.Identifier,
-				"dir":                dir,
-				"ticket":             "DEVPROD-26143",
-			}))
-		}
+		grip.Warning(message.WrapError(dirs.cleanup(), message.Fields{
+			"message":            "could not clean up git clone directory after failing to set up git directories",
+			"project_id":         opts.Ref.Id,
+			"project_identifier": opts.Ref.Identifier,
+		}))
+		// Once dirs has been cleaned up, it's no longer valid to use it, so do
+		// not return it in the result.
+		dirs = nil
 	}()
 
 	includedModuleNames := map[string]struct{}{}
@@ -952,7 +1006,7 @@ func setupParallelGitIncludeDirs(ctx context.Context, modules ModuleList, includ
 		if _, ok := dirs.clonesForOwnerRepo[ownerRepo]; ok {
 			// When including files, there should not be any duplicate repos
 			// defined in the modules, and the modules should not use the exact
-			// same repo as the project itself. If this is ever hit, it's a bug.
+			// same repo/branch as the project itself.
 			grip.Warning(message.Fields{
 				"message":            "trying to make multiple git clones of the same repo, skipping duplicate repo",
 				"project_id":         opts.Ref.Id,
@@ -1038,18 +1092,21 @@ const (
 	ReadFromPatchDiff = "patch_diff"
 )
 
-// readFromRemoteSource returns true if the readFrom option requires
-// retrieving a file from a remote source (i.e. GitHub).
+// readFromRemoteSource returns true if the readFrom option requires retrieving
+// a file from a remote source (i.e. GitHub). If ReadFileFrom is empty, the
+// default behavior is that it reads from a remote source.
 func readFromRemoteSource(readFrom string) bool {
-	return utility.StringSliceContains([]string{ReadFromGithub, ReadFromPatch, ReadFromPatchDiff}, readFrom)
+	return utility.StringSliceContains([]string{"", ReadFromGithub, ReadFromPatch, ReadFromPatchDiff}, readFrom)
 }
 
 type GetProjectOpts struct {
-	Ref                       *ProjectRef
-	PatchOpts                 *PatchOpts
-	LocalModules              map[string]string
-	RemotePath                string
-	Revision                  string
+	Ref          *ProjectRef
+	PatchOpts    *PatchOpts
+	LocalModules map[string]string
+	RemotePath   string
+	Revision     string
+	// ReadFileFrom determines where the file should be fetched from. If
+	// unspecified, the default is ReadFromGithub.
 	ReadFileFrom              string
 	Identifier                string
 	UnmarshalStrict           bool
@@ -1060,6 +1117,12 @@ type GetProjectOpts struct {
 	// IsIncludedFile indicates whether the file being retrieved is an included
 	// YAML file.
 	IsIncludedFile bool
+	// Worktree is the directory of the git worktree to use when retrieving
+	// files via git. Only set if reading a remote file using git.
+	Worktree string
+	// LocalIncludeDir is the base directory for resolving relative include
+	// file paths when ReadFileFrom is ReadFromLocal.
+	LocalIncludeDir string
 }
 
 type PatchOpts struct {
@@ -1079,6 +1142,9 @@ func (opts *GetProjectOpts) UpdateReadFileFrom(path string) {
 	}
 }
 
+// retrieveFile retrieves a file from its source location. If no
+// opts.ReadFileFrom is specified, it will default to retrieving the file from
+// GitHub.
 func retrieveFile(ctx context.Context, opts GetProjectOpts) ([]byte, error) {
 	if opts.RemotePath == "" && opts.Ref != nil {
 		opts.RemotePath = opts.Ref.RemotePath
@@ -1086,7 +1152,11 @@ func retrieveFile(ctx context.Context, opts GetProjectOpts) ([]byte, error) {
 
 	switch opts.ReadFileFrom {
 	case ReadFromLocal:
-		fileContents, err := os.ReadFile(opts.RemotePath)
+		remotePath := opts.RemotePath
+		if !filepath.IsAbs(remotePath) && opts.LocalIncludeDir != "" {
+			remotePath = filepath.Join(opts.LocalIncludeDir, remotePath)
+		}
+		fileContents, err := os.ReadFile(remotePath)
 		if err != nil {
 			return nil, errors.Wrap(err, "reading project config")
 		}
@@ -1113,7 +1183,19 @@ func retrieveFile(ctx context.Context, opts GetProjectOpts) ([]byte, error) {
 			"message":    "errored while attempting to get GitHub app for API, will fall back to using Evergreen-internal app",
 			"project_id": opts.Ref.Id,
 		}))
-		fileContents, err := thirdparty.GetGitHubFileContent(ctx, opts.Ref.Owner, opts.Ref.Repo, opts.Revision, opts.RemotePath, ghAppAuth, !opts.IsIncludedFile && IsGitUsageForGitHubFileEnabled(ctx))
+		useGit := true
+		if opts.IsIncludedFile && opts.Worktree == "" {
+			// Include files that have a git worktree available should try to
+			// use that because it's an optimization to reduce GitHub API calls
+			// (includes use a lot of GitHub API calls). However, if it doesn't
+			// have a git worktree, this should avoid using git entirely because
+			// without a worktree, retrieving every include file without a
+			// pre-created worktree is very slow.
+			// This can still retrieve the file using the GitHub API even though
+			// git is not an option.
+			useGit = false
+		}
+		fileContents, err := thirdparty.GetGitHubFileContent(ctx, opts.Ref.Owner, opts.Ref.Repo, opts.Revision, opts.RemotePath, opts.Worktree, ghAppAuth, useGit)
 		if err != nil {
 			return nil, errors.Wrapf(err, "fetching project config file for project '%s' at revision '%s'", opts.Ref.Id, opts.Revision)
 		}
@@ -1121,7 +1203,7 @@ func retrieveFile(ctx context.Context, opts GetProjectOpts) ([]byte, error) {
 	}
 }
 
-func retrieveFileForModule(ctx context.Context, opts GetProjectOpts, modules ModuleList, include parserInclude) ([]byte, error) {
+func retrieveFileForModule(ctx context.Context, opts GetProjectOpts, modules ModuleList, include parserInclude, dirs *gitIncludeDirs, workerIdx int) ([]byte, error) {
 	// Check if the module has a local change passed in through the CLI or previous patch.
 	if opts.ReferencePatchID != "" {
 		p, err := patch.FindOneId(ctx, opts.ReferencePatchID)
@@ -1142,8 +1224,9 @@ func retrieveFileForModule(ctx context.Context, opts GetProjectOpts, modules Mod
 	// Look through any given local modules first
 	if path, ok := opts.LocalModules[include.Module]; ok {
 		moduleOpts := GetProjectOpts{
-			RemotePath:   fmt.Sprintf("%s/%s", path, opts.RemotePath),
-			ReadFileFrom: ReadFromLocal,
+			RemotePath:      fmt.Sprintf("%s/%s", path, opts.RemotePath),
+			ReadFileFrom:    ReadFromLocal,
+			LocalIncludeDir: opts.LocalIncludeDir,
 		}
 		return retrieveFile(ctx, moduleOpts)
 	} else if opts.ReadFileFrom == ReadFromLocal {
@@ -1157,7 +1240,6 @@ func retrieveFileForModule(ctx context.Context, opts GetProjectOpts, modules Mod
 	repoOwner, repoName, err := module.GetOwnerAndRepo()
 	if err != nil {
 		return nil, errors.Wrapf(err, "getting module owner and repo '%s'", module.Name)
-
 	}
 	pRef := *opts.Ref
 	pRef.Owner = repoOwner
@@ -1167,6 +1249,7 @@ func retrieveFileForModule(ctx context.Context, opts GetProjectOpts, modules Mod
 		RemotePath:   opts.RemotePath,
 		ReadFileFrom: ReadFromGithub,
 		Identifier:   include.Module,
+		Worktree:     dirs.getWorktreeForOwnerRepoWorker(repoOwner, repoName, workerIdx),
 	}
 	moduleOpts.Revision, err = getRevisionForRemoteModule(ctx, *module, include.Module, opts)
 	if err != nil {
@@ -1216,7 +1299,19 @@ func getFileForPatchDiff(ctx context.Context, opts GetProjectOpts) ([]byte, erro
 		"message":    "errored while attempting to get GitHub app for API, will fall back to using Evergreen-internal app",
 		"project_id": opts.Ref.Id,
 	}))
-	projectFileBytes, err := thirdparty.GetGitHubFileContent(ctx, opts.Ref.Owner, opts.Ref.Repo, opts.Revision, opts.RemotePath, ghAppAuth, !opts.IsIncludedFile && IsGitUsageForGitHubFileEnabled(ctx))
+	useGit := true
+	if opts.IsIncludedFile && opts.Worktree == "" {
+		// Include files that have a git worktree available should try to
+		// use that because it's an optimization to reduce GitHub API calls
+		// (includes use a lot of GitHub API calls). However, if it doesn't
+		// have a git worktree, this should avoid using git entirely because
+		// without a worktree, retrieving every include file without a
+		// pre-created worktree is very slow.
+		// This can still retrieve the file using the GitHub API even though
+		// git is not an option.
+		useGit = false
+	}
+	projectFileBytes, err := thirdparty.GetGitHubFileContent(ctx, opts.Ref.Owner, opts.Ref.Repo, opts.Revision, opts.RemotePath, opts.Worktree, ghAppAuth, useGit)
 	if err != nil {
 		// if the project file doesn't exist, but our patch includes a project file,
 		// we try to apply the diff and proceed.
@@ -1227,20 +1322,6 @@ func getFileForPatchDiff(ctx context.Context, opts GetProjectOpts) ([]byte, erro
 		}
 	}
 	return projectFileBytes, nil
-}
-
-// IsGitUsageForGitHubFileEnabled returns whether the experimental feature to
-// use git to retrieve files from GitHub is enabled. If the feature flag can't
-// be retrieved, it defaults to false (i.e. git usage is disabled).
-func IsGitUsageForGitHubFileEnabled(ctx context.Context) bool {
-	flags, err := evergreen.GetServiceFlags(ctx)
-	if err != nil {
-		grip.Warning(message.WrapError(err, message.Fields{
-			"message": "could not get service flags, falling back to assuming that using git is disabled",
-		}))
-		return false
-	}
-	return !flags.UseGitForGitHubFilesDisabled
 }
 
 // fetchProjectFilesTimeout is the maximum timeout to fetch project
@@ -1331,27 +1412,29 @@ func capParserPriorities(p *ParserProject) {
 func TranslateProject(pp *ParserProject) (*Project, error) {
 	// Transfer top level fields
 	proj := &Project{
-		Stepback:           utility.FromBoolPtr(pp.Stepback),
-		PreTimeoutSecs:     utility.FromIntPtr(pp.PreTimeoutSecs),
-		PostTimeoutSecs:    utility.FromIntPtr(pp.PostTimeoutSecs),
-		PreErrorFailsTask:  utility.FromBoolPtr(pp.PreErrorFailsTask),
-		PostErrorFailsTask: utility.FromBoolPtr(pp.PostErrorFailsTask),
-		OomTracker:         utility.FromBoolTPtr(pp.OomTracker), // oom tracker is true by default
-		Identifier:         utility.FromStringPtr(pp.Identifier),
-		DisplayName:        utility.FromStringPtr(pp.DisplayName),
-		CommandType:        utility.FromStringPtr(pp.CommandType),
-		Ignore:             pp.Ignore,
-		Parameters:         pp.Parameters,
-		Containers:         pp.Containers,
-		Pre:                pp.Pre,
-		Post:               pp.Post,
-		Timeout:            pp.Timeout,
-		CallbackTimeout:    utility.FromIntPtr(pp.CallbackTimeout),
-		Modules:            pp.Modules,
-		Functions:          pp.Functions,
-		ExecTimeoutSecs:    utility.FromIntPtr(pp.ExecTimeoutSecs),
-		TimeoutSecs:        utility.FromIntPtr(pp.TimeoutSecs),
-		NumIncludes:        len(pp.Include),
+
+		Stepback:                       utility.FromBoolPtr(pp.Stepback),
+		PreTimeoutSecs:                 utility.FromIntPtr(pp.PreTimeoutSecs),
+		PostTimeoutSecs:                utility.FromIntPtr(pp.PostTimeoutSecs),
+		PreErrorFailsTask:              utility.FromBoolPtr(pp.PreErrorFailsTask),
+		PostErrorFailsTask:             utility.FromBoolPtr(pp.PostErrorFailsTask),
+		OomTracker:                     utility.FromBoolTPtr(pp.OomTracker), // oom tracker is true by default
+		PS:                             utility.FromStringPtr(pp.Ps),
+		Identifier:                     utility.FromStringPtr(pp.Identifier),
+		DisplayName:                    utility.FromStringPtr(pp.DisplayName),
+		CommandType:                    utility.FromStringPtr(pp.CommandType),
+		DisableMergeQueuePathFiltering: utility.FromBoolPtr(pp.DisableMergeQueuePathFiltering),
+		Ignore:                         pp.Ignore,
+		Parameters:                     pp.Parameters,
+		Pre:                            pp.Pre,
+		Post:                           pp.Post,
+		Timeout:                        pp.Timeout,
+		CallbackTimeout:                utility.FromIntPtr(pp.CallbackTimeout),
+		Modules:                        pp.Modules,
+		Functions:                      pp.Functions,
+		ExecTimeoutSecs:                utility.FromIntPtr(pp.ExecTimeoutSecs),
+		TimeoutSecs:                    utility.FromIntPtr(pp.TimeoutSecs),
+		NumIncludes:                    len(pp.Include),
 	}
 	catcher := grip.NewBasicCatcher()
 	tse := NewParserTaskSelectorEvaluator(pp.Tasks)
@@ -1365,6 +1448,10 @@ func TranslateProject(pp *ParserProject) (*Project, error) {
 
 	proj.BuildVariants, errs = evaluateBuildVariants(tse, tgse, vse, buildVariants, pp.Tasks, proj.TaskGroups)
 	catcher.Extend(errs)
+
+	// Build the task cache for O(1) lookups
+	proj.buildTaskCache()
+
 	return proj, errors.Wrap(catcher.Resolve(), TranslateProjectError)
 }
 
@@ -1443,6 +1530,7 @@ func evaluateTaskUnits(tse *taskSelectorEvaluator, tgse *tagSelectorEvaluator, v
 			GitTagOnly:      pt.GitTagOnly,
 			Stepback:        pt.Stepback,
 			MustHaveResults: pt.MustHaveResults,
+			PS:              pt.Ps,
 		}
 		if strings.Contains(strings.TrimSpace(pt.Name), " ") {
 			evalErrs = append(evalErrs, errors.Errorf("spaces are not allowed in task names ('%s')", pt.Name))
@@ -1516,13 +1604,14 @@ func evaluateBuildVariants(tse *taskSelectorEvaluator, tgse *tagSelectorEvaluato
 			PatchOnly:          pbv.PatchOnly,
 			AllowForGitTag:     pbv.AllowForGitTag,
 			GitTagOnly:         pbv.GitTagOnly,
+			AllowedRequesters:  pbv.AllowedRequesters,
+			ExecTimeoutSecs:    pbv.ExecTimeoutSecs,
 			Stepback:           pbv.Stepback,
 			DeactivatePrevious: pbv.DeactivatePrevious,
 			RunOn:              pbv.RunOn,
 			Tags:               pbv.Tags,
 			Paths:              pbv.Paths,
 		}
-		bv.AllowedRequesters = pbv.AllowedRequesters
 		bv.Tasks, unmatchedSelectors, unmatchedCriteria, errs = evaluateBVTasks(tse, tgse, vse, pbv, tasks)
 		if len(unmatchedSelectors) > 0 {
 			bv.TranslationWarnings = append(bv.TranslationWarnings, fmt.Sprintf("buildvariant '%s' has unmatched selector: '%s'", pbv.Name, strings.Join(unmatchedSelectors, "', '")))
@@ -1759,22 +1848,24 @@ func evaluateBVTasks(tse *taskSelectorEvaluator, tgse *tagSelectorEvaluator, vse
 // * Build variant's settings
 func getParserBuildVariantTaskUnit(name string, pt parserTask, bvt parserBVTaskUnit, bv parserBV) BuildVariantTaskUnit {
 	res := BuildVariantTaskUnit{
-		Name:           name,
-		Variant:        bv.Name,
-		Patchable:      bvt.Patchable,
-		PatchOnly:      bvt.PatchOnly,
-		Disable:        bvt.Disable,
-		AllowForGitTag: bvt.AllowForGitTag,
-		GitTagOnly:     bvt.GitTagOnly,
-		Priority:       bvt.Priority,
-		Stepback:       bvt.Stepback,
-		RunOn:          bvt.RunOn,
-		CronBatchTime:  bvt.CronBatchTime,
-		BatchTime:      bvt.BatchTime,
-		Activate:       bvt.Activate,
-		CreateCheckRun: bvt.CreateCheckRun,
+		Name:              name,
+		Variant:           bv.Name,
+		Patchable:         bvt.Patchable,
+		PatchOnly:         bvt.PatchOnly,
+		Disable:           bvt.Disable,
+		AllowForGitTag:    bvt.AllowForGitTag,
+		GitTagOnly:        bvt.GitTagOnly,
+		AllowedRequesters: bvt.AllowedRequesters,
+		ExecTimeoutSecs:   bvt.ExecTimeoutSecs,
+		Priority:          bvt.Priority,
+		Stepback:          bvt.Stepback,
+		RunOn:             bvt.RunOn,
+		CronBatchTime:     bvt.CronBatchTime,
+		BatchTime:         bvt.BatchTime,
+		Activate:          bvt.Activate,
+		PS:                bvt.PS,
+		CreateCheckRun:    bvt.CreateCheckRun,
 	}
-	res.AllowedRequesters = bvt.AllowedRequesters
 	if res.Priority == 0 {
 		res.Priority = pt.Priority
 	}
@@ -1796,6 +1887,9 @@ func getParserBuildVariantTaskUnit(name string, pt parserTask, bvt parserBVTaskU
 	if len(res.AllowedRequesters) == 0 {
 		res.AllowedRequesters = pt.AllowedRequesters
 	}
+	if res.ExecTimeoutSecs == 0 {
+		res.ExecTimeoutSecs = pt.ExecTimeoutSecs
+	}
 	if res.Stepback == nil {
 		res.Stepback = pt.Stepback
 	}
@@ -1805,6 +1899,9 @@ func getParserBuildVariantTaskUnit(name string, pt parserTask, bvt parserBVTaskU
 	}
 	if len(res.RunOn) == 0 {
 		res.RunOn = pt.RunOn
+	}
+	if res.PS == nil {
+		res.PS = pt.Ps
 	}
 
 	// Build variant level settings are lower priority than project task level
@@ -1824,7 +1921,9 @@ func getParserBuildVariantTaskUnit(name string, pt parserTask, bvt parserBVTaskU
 	if len(res.AllowedRequesters) == 0 {
 		res.AllowedRequesters = bv.AllowedRequesters
 	}
-
+	if res.ExecTimeoutSecs == 0 {
+		res.ExecTimeoutSecs = bv.ExecTimeoutSecs
+	}
 	if res.Disable == nil {
 		res.Disable = bv.Disable
 	}

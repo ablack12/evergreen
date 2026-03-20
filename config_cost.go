@@ -9,11 +9,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-const (
-	// S3PutRequestCost is the cost per S3 PUT request ($0.000005).
-	S3PutRequestCost = 0.000005
-)
-
 // CostConfig represents the admin config section for finance-related settings.
 type CostConfig struct {
 	// FinanceFormula determines the weighting/percentage of the two parts of total cost: savingsPlanComponent and onDemandComponent.
@@ -24,6 +19,8 @@ type CostConfig struct {
 	OnDemandDiscount float64 `bson:"on_demand_discount" json:"on_demand_discount" yaml:"on_demand_discount"`
 	// S3Cost holds S3-related cost discount configuration
 	S3Cost S3CostConfig `bson:"s3_cost" json:"s3_cost" yaml:"s3_cost"`
+	// EBSCost holds EBS-related cost discount configuration
+	EBSCost EBSCostConfig `bson:"ebs_cost" json:"ebs_cost" yaml:"ebs_cost"`
 }
 
 // S3UploadCostConfig represents S3 upload cost discount configuration.
@@ -43,11 +40,18 @@ type S3CostConfig struct {
 	Storage S3StorageCostConfig `bson:"storage" json:"storage" yaml:"storage"`
 }
 
+// EBSCostConfig holds EBS-related cost discount configuration.
+type EBSCostConfig struct {
+	// EBSDiscount is the discount rate (0.0-1.0) applied to EBS costs (throughput, storage, etc.).
+	EBSDiscount float64 `bson:"ebs_discount" json:"ebs_discount" yaml:"ebs_discount"`
+}
+
 var (
 	financeConfigFormulaKey             = bsonutil.MustHaveTag(CostConfig{}, "FinanceFormula")
 	financeConfigSavingsPlanDiscountKey = bsonutil.MustHaveTag(CostConfig{}, "SavingsPlanDiscount")
 	financeConfigOnDemandDiscountKey    = bsonutil.MustHaveTag(CostConfig{}, "OnDemandDiscount")
 	financeConfigS3CostKey              = bsonutil.MustHaveTag(CostConfig{}, "S3Cost")
+	financeConfigEBSCostKey             = bsonutil.MustHaveTag(CostConfig{}, "EBSCost")
 )
 
 func (*CostConfig) SectionId() string { return "cost" }
@@ -63,6 +67,7 @@ func (c *CostConfig) Set(ctx context.Context) error {
 			financeConfigSavingsPlanDiscountKey: c.SavingsPlanDiscount,
 			financeConfigOnDemandDiscountKey:    c.OnDemandDiscount,
 			financeConfigS3CostKey:              c.S3Cost,
+			financeConfigEBSCostKey:             c.EBSCost,
 		}}), "updating config section '%s'", c.SectionId(),
 	)
 }
@@ -82,6 +87,7 @@ func (c *CostConfig) ValidateAndDefault() error {
 	validateDiscountField(c.S3Cost.Upload.UploadCostDiscount, "S3 upload cost discount", catcher)
 	validateDiscountField(c.S3Cost.Storage.StandardStorageCostDiscount, "S3 standard storage cost discount", catcher)
 	validateDiscountField(c.S3Cost.Storage.IAStorageCostDiscount, "S3 infrequent access storage cost discount", catcher)
+	validateDiscountField(c.EBSCost.EBSDiscount, "EBS cost discount", catcher)
 
 	return catcher.Resolve()
 }
@@ -93,5 +99,6 @@ func (c *CostConfig) IsConfigured() bool {
 		c.OnDemandDiscount != 0 ||
 		c.S3Cost.Upload.UploadCostDiscount != 0 ||
 		c.S3Cost.Storage.StandardStorageCostDiscount != 0 ||
-		c.S3Cost.Storage.IAStorageCostDiscount != 0
+		c.S3Cost.Storage.IAStorageCostDiscount != 0 ||
+		c.EBSCost.EBSDiscount != 0
 }

@@ -72,7 +72,11 @@ type TaskLogGetOptions struct {
 }
 
 // NewTaskLogSender returns a new task log sender for the given task run.
-func NewTaskLogSender(ctx context.Context, task Task, senderOpts EvergreenSenderOptions, logType TaskLogType) (send.Sender, error) {
+func NewTaskLogSender(ctx context.Context, task *Task, senderOpts EvergreenSenderOptions, logType TaskLogType) (send.Sender, error) {
+	if task == nil {
+		return nil, nil
+	}
+
 	output, ok := task.GetTaskOutputSafe()
 	if !ok {
 		// We know there task cannot have task output, likely because
@@ -89,15 +93,19 @@ func NewTaskLogSender(ctx context.Context, task Task, senderOpts EvergreenSender
 		return nil, errors.Wrap(err, "getting log service")
 	}
 
-	senderOpts.appendLines = func(ctx context.Context, lines []log.LogLine) error {
-		return svc.Append(ctx, getLogName(task, logType, output.TaskLogs.ID()), 0, lines)
+	senderOpts.appendLines = func(ctx context.Context, lines []log.LogLine) (int64, error) {
+		return svc.Append(ctx, getLogName(*task, logType, output.TaskLogs.ID()), 0, lines)
 	}
 
 	return newEvergreenSender(ctx, fmt.Sprintf("%s-%s", task.Id, logType), senderOpts)
 }
 
 // AppendTaskLogs appends log lines to the specified task log for the given task run.
-func AppendTaskLogs(ctx context.Context, task Task, logType TaskLogType, lines []log.LogLine) error {
+func AppendTaskLogs(ctx context.Context, task *Task, logType TaskLogType, lines []log.LogLine) error {
+	if task == nil {
+		return nil
+	}
+
 	output, ok := task.GetTaskOutputSafe()
 	if !ok {
 		// We know there task cannot have task output, likely because
@@ -114,7 +122,16 @@ func AppendTaskLogs(ctx context.Context, task Task, logType TaskLogType, lines [
 		return errors.Wrap(err, "getting log service")
 	}
 
-	return svc.Append(ctx, getLogName(task, logType, output.TaskLogs.ID()), 0, lines)
+	uploadBytes, err := svc.Append(ctx, getLogName(*task, logType, output.TaskLogs.ID()), 0, lines)
+	if err != nil {
+		return err
+	}
+
+	if uploadBytes > 0 {
+		task.S3Usage.IncrementLogs(1, uploadBytes)
+	}
+
+	return nil
 }
 
 // getTaskLogs returns task logs belonging to the specified task run.

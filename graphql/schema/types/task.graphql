@@ -74,7 +74,6 @@ type Task {
   canSchedule: Boolean!
   canSetPriority: Boolean!
   canUnschedule: Boolean!
-  containerAllocatedTime: Time
   createTime: Time
   dependsOn: [Dependency!]
   details: TaskEndDetail
@@ -87,8 +86,10 @@ type Task {
   displayStatus: String!
   displayTask: Task
   distroId: String!
+  errors: [String!]
   estimatedStart: Duration
   execution: Int!
+  executionSteps: [TaskExecutionStep!]
   executionTasks: [String!]
   executionTasksFull: [Task!]
   expectedDuration: Duration
@@ -98,6 +99,7 @@ type Task {
   generatedBy: String
   generatedByName: String
   generateTask: Boolean
+  generator: Task
   hasTestResults: Boolean!
   hostId: String
   imageId: String!
@@ -109,7 +111,11 @@ type Task {
   order: Int!
   patch: Patch
   patchNumber: Int
-  pod: Pod
+  prevTaskBreaking: Task
+  prevTaskPassing: Task
+  """prevTask may be in-progress"""
+  prevTask: Task
+  prevTaskCompleted: Task
   priority: Int
   project: Project
   projectId: String!
@@ -140,6 +146,21 @@ type Task {
   timeTaken: Duration
   totalTestCount: Int!
   versionMetadata: Version!
+}
+
+"""
+TaskExecutionStep represents a single step in a task's execution plan.
+"""
+type TaskExecutionStep {
+  blockType: String!
+  commandName: String!
+  displayName: String!
+  functionName: String!
+  isFunction: Boolean!
+  """
+  stepNumber is intentionally a string because step numbers are formatted in decimal notation, i.e. '2.1'
+  """
+  stepNumber: String!
 }
 
 type AbortInfo {
@@ -297,6 +318,8 @@ Cost represents the cost breakdown for a task or version.
 type Cost {
   onDemandEC2Cost: Float
   adjustedEC2Cost: Float
+  s3ArtifactPutCost: Float
+  s3LogPutCost: Float
 }
 
 input QuarantineTestInput {

@@ -18,6 +18,7 @@ import (
 	"github.com/evergreen-ci/evergreen/agent/internal/client"
 	agentutil "github.com/evergreen-ci/evergreen/agent/util"
 	"github.com/evergreen-ci/evergreen/model/artifact"
+	"github.com/evergreen-ci/evergreen/model/s3usage"
 	"github.com/evergreen-ci/evergreen/util"
 	"github.com/evergreen-ci/pail"
 	"github.com/evergreen-ci/utility"
@@ -385,7 +386,7 @@ func (s3pc *s3put) Execute(ctx context.Context, comm client.Communicator, logger
 
 	errChan := make(chan error)
 	go func() {
-		err := errors.WithStack(s3pc.putWithRetry(ctx, comm, logger))
+		err := errors.WithStack(s3pc.putWithRetry(ctx, comm, logger, conf))
 		select {
 		case errChan <- err:
 			return
@@ -406,12 +407,12 @@ func (s3pc *s3put) Execute(ctx context.Context, comm client.Communicator, logger
 }
 
 // Wrapper around the Put() function to retry it.
-func (s3pc *s3put) putWithRetry(ctx context.Context, comm client.Communicator, logger client.LoggerProducer) error {
+func (s3pc *s3put) putWithRetry(ctx context.Context, comm client.Communicator, logger client.LoggerProducer, conf *internal.TaskConfig) error {
 	backoffCounter := getS3OpBackoff()
 
 	var (
 		err               error
-		uploadedFiles     []string
+		uploadedFiles     []s3usage.FileMetrics
 		filesList         []string
 		skippedFilesCount int
 	)
@@ -460,7 +461,7 @@ retryLoop:
 			}
 
 			// reset to avoid duplicated uploaded references
-			uploadedFiles = []string{}
+			uploadedFiles = []s3usage.FileMetrics{}
 			skippedFilesCount = 0
 
 		uploadLoop:
@@ -524,11 +525,16 @@ retryLoop:
 					continue retryLoop
 				}
 
+				uploadPath := fpath
 				if s3pc.preservePath {
-					uploadedFiles = append(uploadedFiles, remoteName)
-				} else {
-					uploadedFiles = append(uploadedFiles, fpath)
+					uploadPath = remoteName
 				}
+
+				uploadedFiles = append(uploadedFiles, s3usage.FileMetrics{
+					LocalPath:  uploadPath,
+					RemotePath: remoteName,
+				})
+
 			}
 
 			break retryLoop
@@ -540,7 +546,17 @@ retryLoop:
 		return nil
 	}
 
-	err = errors.WithStack(s3pc.attachFiles(ctx, comm, uploadedFiles, s3pc.RemoteFile))
+	uploadedFiles, totalFileSize, totalPutRequests := s3usage.CalculateUploadMetrics(
+		logger.Task(),
+		uploadedFiles,
+		s3usage.S3BucketTypeLarge,
+		s3usage.S3UploadMethodPut,
+	)
+
+	maxPuts, minPuts := computePerFileExtremes(uploadedFiles)
+	conf.S3Usage.IncrementArtifacts(totalPutRequests, totalFileSize, len(uploadedFiles), maxPuts, minPuts)
+
+	err = errors.WithStack(s3pc.attachFiles(ctx, comm, uploadedFiles, s3pc.RemoteFile, conf))
 	if err != nil {
 		return err
 	}
@@ -557,35 +573,45 @@ retryLoop:
 	return nil
 }
 
+// computePerFileExtremes returns the max and min PutRequests across all uploaded files.
+func computePerFileExtremes(files []s3usage.FileMetrics) (maxPuts, minPuts int) {
+	if len(files) == 0 {
+		return 0, 0
+	}
+	maxPuts = files[0].PutRequests
+	minPuts = files[0].PutRequests
+	for i := 1; i < len(files); i++ {
+		if files[i].PutRequests > maxPuts {
+			maxPuts = files[i].PutRequests
+		}
+		if files[i].PutRequests < minPuts {
+			minPuts = files[i].PutRequests
+		}
+	}
+	return maxPuts, minPuts
+}
+
 // attachTaskFiles is responsible for sending the
 // specified file to the API Server. Does not support multiple file putting.
-func (s3pc *s3put) attachFiles(ctx context.Context, comm client.Communicator, localFiles []string, remoteFile string) error {
+func (s3pc *s3put) attachFiles(ctx context.Context, comm client.Communicator, uploadedFiles []s3usage.FileMetrics, remoteFile string, conf *internal.TaskConfig) error {
 	files := []*artifact.File{}
 
-	for _, fn := range localFiles {
-		remoteFileName := filepath.ToSlash(remoteFile)
-
-		if s3pc.isMulti() {
-			if s3pc.preservePath {
-				remoteFileName = fn
-			} else {
-				remoteFileName = fmt.Sprintf("%s%s", remoteFile, filepath.Base(fn))
-			}
-
-		}
-
+	for _, uploadInfo := range uploadedFiles {
+		remoteFileName := filepath.ToSlash(uploadInfo.RemotePath)
 		fileLink := agentutil.S3DefaultURL(s3pc.Bucket, remoteFileName)
 
 		displayName := s3pc.ResourceDisplayName
 		if displayName == "" {
-			displayName = filepath.Base(fn)
+			displayName = filepath.Base(uploadInfo.LocalPath)
 		} else if s3pc.isMulti() {
-			displayName = fmt.Sprintf("%s %s", s3pc.ResourceDisplayName, filepath.Base(fn))
+			displayName = fmt.Sprintf("%s %s", s3pc.ResourceDisplayName, filepath.Base(uploadInfo.LocalPath))
 		}
-		var key, secret, bucket, fileKey string
+
+		bucket := s3pc.Bucket
+		fileKey := remoteFileName
+
+		var key, secret string
 		if s3pc.Visibility == artifact.Signed {
-			bucket = s3pc.Bucket
-			fileKey = remoteFileName
 			key = s3pc.AwsKey
 			secret = s3pc.AwsSecret
 		}
@@ -601,6 +627,8 @@ func (s3pc *s3put) attachFiles(ctx context.Context, comm client.Communicator, lo
 			Bucket:      bucket,
 			FileKey:     fileKey,
 			ContentType: s3pc.ContentType,
+			FileSize:    uploadInfo.FileSizeBytes,
+			PutRequests: uploadInfo.PutRequests,
 		})
 	}
 
@@ -612,19 +640,25 @@ func (s3pc *s3put) attachFiles(ctx context.Context, comm client.Communicator, lo
 	return nil
 }
 
+// s3PutOptions returns the pail S3 options for the s3.put command.
+func (s3pc *s3put) s3PutOptions() pail.S3Options {
+	return pail.S3Options{
+		Region:               s3pc.Region,
+		Name:                 s3pc.Bucket,
+		Permissions:          pail.S3Permissions(s3pc.Permissions),
+		ContentType:          s3pc.ContentType,
+		StorageClass:         s3Types.StorageClassIntelligentTiering,
+		IfNotExists:          s3pc.skipExistingBool,
+		UploadChecksumSHA256: s3pc.checksumSHA256Bool,
+	}
+}
+
 func (s3pc *s3put) createPailBucket(ctx context.Context, comm client.Communicator, httpClient *http.Client) error {
 	if s3pc.bucket != nil {
 		return nil
 	}
 
-	opts := pail.S3Options{
-		Region:               s3pc.Region,
-		Name:                 s3pc.Bucket,
-		Permissions:          pail.S3Permissions(s3pc.Permissions),
-		ContentType:          s3pc.ContentType,
-		IfNotExists:          s3pc.skipExistingBool,
-		UploadChecksumSHA256: s3pc.checksumSHA256Bool,
-	}
+	opts := s3pc.s3PutOptions()
 
 	if s3pc.getRoleARN() != "" {
 		opts.Credentials = createEvergreenCredentials(comm, s3pc.taskData, s3pc.existingCredentials, s3pc.getRoleARN(), func(s string) {

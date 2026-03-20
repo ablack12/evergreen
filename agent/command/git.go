@@ -48,6 +48,7 @@ var (
 	cloneBranchAttribute  = fmt.Sprintf("%s.clone_branch", gitGetProjectAttribute)
 	cloneModuleAttribute  = fmt.Sprintf("%s.clone_module", gitGetProjectAttribute)
 	cloneAttemptAttribute = fmt.Sprintf("%s.attempt", gitGetProjectAttribute)
+	cloneErrorAttribute   = fmt.Sprintf("%s.error", gitGetProjectAttribute)
 )
 
 // gitFetchProject is a command that fetches source code from git for the project
@@ -355,9 +356,9 @@ func (c *gitFetchProject) Execute(ctx context.Context, comm client.Communicator,
 	return err
 }
 
-func (c *gitFetchProject) fetchSource(ctx context.Context, logger client.LoggerProducer, conf *internal.TaskConfig, opts cloneOpts) error {
+func (c *gitFetchProject) fetchSource(ctx context.Context, logger client.LoggerProducer, comm client.Communicator, conf *internal.TaskConfig, opts cloneOpts) error {
 	attempt := 0
-	return c.retryFetch(ctx, logger, true, opts, func(opts cloneOpts) error {
+	return c.retryFetch(ctx, logger, comm, conf, true, opts, func(opts cloneOpts) error {
 		attempt++
 		gitCommands, err := c.buildSourceCloneCommand(conf, opts)
 		if err != nil {
@@ -386,11 +387,15 @@ func (c *gitFetchProject) fetchSource(ctx context.Context, logger client.LoggerP
 		))
 		defer span.End()
 
-		return fetchSourceCmd.Run(ctx)
+		if err = fetchSourceCmd.Run(ctx); err != nil {
+			span.SetAttributes(attribute.String(cloneErrorAttribute, err.Error()))
+		}
+
+		return err
 	})
 }
 
-func (c *gitFetchProject) retryFetch(ctx context.Context, logger client.LoggerProducer, isSource bool, opts cloneOpts, fetch func(cloneOpts) error) error {
+func (c *gitFetchProject) retryFetch(ctx context.Context, logger client.LoggerProducer, comm client.Communicator, conf *internal.TaskConfig, isSource bool, opts cloneOpts, fetch func(cloneOpts) error) error {
 	const (
 		fetchRetryMinDelay = time.Second
 		fetchRetryMaxDelay = 10 * time.Second
@@ -419,6 +424,9 @@ func (c *gitFetchProject) retryFetch(ctx context.Context, logger client.LoggerPr
 					logger.Task().Warning("git source clone failed with cached merge SHA; re-requesting merge SHA from GitHub")
 				}
 				if strings.Contains(err.Error(), githubMergeQueueInvalidRefError) {
+					if markErr := comm.MarkMergeQueueGitRefNotFound(ctx, conf.TaskData()); markErr != nil {
+						logger.Task().Warningf("Failed to mark git ref not found: %s", markErr)
+					}
 					return false, errors.Wrap(err, "the GitHub merge SHA is not available most likely because the merge completed or was aborted")
 				}
 				return true, errors.Wrapf(err, "attempt %d", attemptNum)
@@ -536,7 +544,7 @@ func (c *gitFetchProject) fetchModuleSource(ctx context.Context,
 	}
 
 	attempt := 0
-	return c.retryFetch(ctx, logger, false, opts, func(opts cloneOpts) error {
+	return c.retryFetch(ctx, logger, comm, conf, false, opts, func(opts cloneOpts) error {
 		attempt++
 		ctx, span := getTracer().Start(ctx, "clone_module", trace.WithAttributes(
 			attribute.String(cloneModuleAttribute, module.Name),
@@ -569,6 +577,11 @@ func (c *gitFetchProject) fetchModuleSource(ctx context.Context,
 			errOutput = strings.ReplaceAll(errOutput, "\n", fmt.Sprintf("\n%s: ", module.Name))
 			logger.Task().Error(fmt.Sprintf("%s: %s", module.Name, errOutput))
 		}
+
+		if err != nil {
+			span.SetAttributes(attribute.String(cloneErrorAttribute, err.Error()))
+		}
+
 		return err
 	})
 }
@@ -583,7 +596,7 @@ func (c *gitFetchProject) fetch(ctx context.Context,
 	defer cancel()
 
 	// Clone the project.
-	if err := c.fetchSource(ctx, logger, conf, opts); err != nil {
+	if err := c.fetchSource(ctx, logger, comm, conf, opts); err != nil {
 		return errors.Wrap(err, "problem running fetch command")
 	}
 
@@ -600,10 +613,6 @@ func (c *gitFetchProject) fetch(ctx context.Context,
 
 	// For every module, expand the module prefix.
 	for _, moduleName := range conf.BuildVariant.Modules {
-		expanded, err := conf.NewExpansions.ExpandString(moduleName)
-		if err == nil {
-			moduleName = expanded
-		}
 		module, err := conf.Project.GetModuleByName(moduleName)
 		if err != nil {
 			return errors.Wrapf(err, "getting module '%s'", moduleName)
@@ -618,13 +627,7 @@ func (c *gitFetchProject) fetch(ctx context.Context,
 	g.SetLimit(10)
 
 	// Clone the project's modules in goroutines.
-	for _, name := range conf.BuildVariant.Modules {
-		// TODO (DEVPROD-3611): remove capturing the loop variable and use the loop variable directly.
-		moduleName := name
-		expanded, err := conf.NewExpansions.ExpandString(moduleName)
-		if err == nil {
-			moduleName = expanded
-		}
+	for _, moduleName := range conf.BuildVariant.Modules {
 		g.Go(func() error {
 			if err := gCtx.Err(); err != nil {
 				return nil
@@ -830,9 +833,3 @@ func isGitHubPRModulePatch(conf *internal.TaskConfig, modulePatch *patch.ModuleP
 func isGitHub(conf *internal.TaskConfig) bool {
 	return conf.GithubPatchData.PRNumber != 0 || conf.GithubMergeData.HeadSHA != ""
 }
-
-type noopWriteCloser struct {
-	*bytes.Buffer
-}
-
-func (noopWriteCloser) Close() error { return nil }

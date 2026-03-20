@@ -80,7 +80,6 @@ mutation SaveAdminSettingsOther {
         totalProjectLimit: 100
         repoProjectLimit: 50
         repoExceptions: [{ owner: "test-owner", repo: "test-repo" }]
-        jiraProject: "TEST"
       }
       githubCheckRun: { checkRunLimit: 10 }
       releaseMode: {
@@ -92,6 +91,9 @@ mutation SaveAdminSettingsOther {
         financeFormula: 0.01
         savingsPlanDiscount: 0.01
         onDemandDiscount: 0.01
+      }
+      debugSpawnHosts: {
+        setupScript: "echo setup"
       }
     }
   ) {
@@ -176,7 +178,6 @@ mutation SaveAdminSettingsOther {
         owner
         repo
       }
-      jiraProject
     }
     githubCheckRun {
       checkRunLimit
@@ -190,6 +191,9 @@ mutation SaveAdminSettingsOther {
       financeFormula
       savingsPlanDiscount
       onDemandDiscount
+    }
+    debugSpawnHosts {
+      setupScript
     }
   }
 }

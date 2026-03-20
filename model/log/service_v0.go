@@ -65,9 +65,9 @@ func (s *logServiceV0) Get(ctx context.Context, getOpts GetOptions) (LogIterator
 	return it, nil
 }
 
-func (s *logServiceV0) Append(ctx context.Context, logName string, sequence int, lines []LogLine) error {
+func (s *logServiceV0) Append(ctx context.Context, logName string, sequence int, lines []LogLine) (int64, error) {
 	if len(lines) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	var rawLines []byte
@@ -76,7 +76,11 @@ func (s *logServiceV0) Append(ctx context.Context, logName string, sequence int,
 	}
 
 	key := fmt.Sprintf("%s/%s", logName, s.createChunkKey(sequence, lines[0].Timestamp, lines[len(lines)-1].Timestamp, len(lines)))
-	return errors.Wrap(s.bucket.Put(ctx, key, bytes.NewReader(rawLines)), "writing log chunk to bucket")
+	if err := s.bucket.Put(ctx, key, bytes.NewReader(rawLines)); err != nil {
+		return 0, errors.Wrap(err, "writing log chunk to bucket")
+	}
+
+	return int64(len(rawLines)), nil
 }
 
 // getLogChunks maps each logical log to its chunk files stored in pail-backed

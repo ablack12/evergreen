@@ -14,6 +14,7 @@ import (
 	"github.com/evergreen-ci/evergreen/apimodels"
 	"github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/patch"
+	"github.com/evergreen-ci/evergreen/model/s3usage"
 	"github.com/evergreen-ci/evergreen/model/task"
 	"github.com/evergreen-ci/evergreen/thirdparty"
 	"github.com/evergreen-ci/evergreen/util"
@@ -66,6 +67,7 @@ type TaskConfig struct {
 	Timeout            Timeout
 	TaskOutput         evergreen.S3Credentials
 	ModulePaths        map[string]string
+	S3Usage            *s3usage.S3Usage
 	// HasTestResults is true if the task has sent at least one test result.
 	HasTestResults bool
 	// HasFailingTestResult is true if the task has sent at least one test
@@ -74,6 +76,7 @@ type TaskConfig struct {
 	TaskGroup            *model.TaskGroup
 	CommandCleanups      []CommandCleanup
 	MaxExecTimeoutSecs   int
+	PSLoggingDisabled    bool
 
 	// PatchOrVersionDescription holds the description of a patch or
 	// message of a version to be used in the otel attributes.
@@ -262,6 +265,18 @@ func NewTaskConfig(opts TaskConfigOptions) (*TaskConfig, error) {
 		taskConfig.PatchOrVersionDescription = opts.Patch.Description
 	} else if opts.Version != nil {
 		taskConfig.PatchOrVersionDescription = opts.Version.Message
+	}
+
+	if opts.ExpansionsAndVars != nil && opts.ExpansionsAndVars.Expansions != nil {
+		expandedModules := make([]string, 0, len(taskConfig.BuildVariant.Modules))
+		for _, moduleName := range taskConfig.BuildVariant.Modules {
+			expanded, err := opts.ExpansionsAndVars.Expansions.ExpandString(moduleName)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to expand module '%s'", moduleName)
+			}
+			expandedModules = append(expandedModules, expanded)
+		}
+		taskConfig.BuildVariant.Modules = expandedModules
 	}
 
 	return taskConfig, nil

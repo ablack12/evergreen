@@ -17,6 +17,7 @@ import (
 	"github.com/evergreen-ci/evergreen/apimodels"
 	"github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/artifact"
+	"github.com/evergreen-ci/evergreen/model/s3usage"
 	"github.com/evergreen-ci/evergreen/model/task"
 	"github.com/evergreen-ci/evergreen/testutil"
 	"github.com/evergreen-ci/evergreen/util"
@@ -306,6 +307,22 @@ func TestS3PutValidateParams(t *testing.T) {
 	})
 }
 
+func TestS3PutOptionsStorageClass(t *testing.T) {
+	cmd := &s3put{
+		Region:      "us-east-1",
+		Bucket:      "test-bucket",
+		Permissions: string(s3Types.BucketCannedACLPrivate),
+		ContentType: "application/x-tar",
+	}
+
+	opts := cmd.s3PutOptions()
+	assert.Equal(t, s3Types.StorageClassIntelligentTiering, opts.StorageClass)
+	assert.Equal(t, "us-east-1", opts.Region)
+	assert.Equal(t, "test-bucket", opts.Name)
+	assert.Equal(t, pail.S3Permissions("private"), opts.Permissions)
+	assert.Equal(t, "application/x-tar", opts.ContentType)
+}
+
 func TestExpandS3PutParams(t *testing.T) {
 
 	Convey("With an s3 put command and a task config", t, func() {
@@ -393,6 +410,13 @@ func TestExpandS3PutParams(t *testing.T) {
 func TestSignedUrlVisibility(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	tempDir := t.TempDir()
+	file1 := filepath.Join(tempDir, "file1")
+	file2 := filepath.Join(tempDir, "file2")
+	require.NoError(t, os.WriteFile(file1, []byte("content1"), 0644))
+	require.NoError(t, os.WriteFile(file2, []byte("content2"), 0644))
+
 	for _, vis := range []string{"signed", "private"} {
 		s := s3put{
 			AwsKey:        "key",
@@ -407,10 +431,33 @@ func TestSignedUrlVisibility(t *testing.T) {
 
 		comm := client.NewMock("http://localhost.com")
 
-		localFiles := []string{"file1", "file2"}
+		conf := &internal.TaskConfig{
+			Task: task.Task{Id: "task_id"},
+		}
+
 		remoteFile := "remote file"
 
-		require.NoError(t, s.attachFiles(ctx, comm, localFiles, remoteFile))
+		file1Info, err := os.Stat(file1)
+		require.NoError(t, err)
+		file2Info, err := os.Stat(file2)
+		require.NoError(t, err)
+
+		uploadedFiles := []s3usage.FileMetrics{
+			{
+				LocalPath:     file1,
+				RemotePath:    remoteFile,
+				FileSizeBytes: file1Info.Size(),
+				PutRequests:   s3usage.CalculatePutRequestsWithContext(s3usage.S3BucketTypeLarge, s3usage.S3UploadMethodPut, file1Info.Size()),
+			},
+			{
+				LocalPath:     file2,
+				RemotePath:    remoteFile,
+				FileSizeBytes: file2Info.Size(),
+				PutRequests:   s3usage.CalculatePutRequestsWithContext(s3usage.S3BucketTypeLarge, s3usage.S3UploadMethodPut, file2Info.Size()),
+			},
+		}
+
+		require.NoError(t, s.attachFiles(ctx, comm, uploadedFiles, remoteFile, conf))
 
 		attachedFiles := comm.AttachedFiles
 		if v, found := attachedFiles[""]; found {
@@ -432,6 +479,13 @@ func TestSignedUrlVisibility(t *testing.T) {
 func TestContentTypeSaved(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	tempDir := t.TempDir()
+	file1 := filepath.Join(tempDir, "file1")
+	file2 := filepath.Join(tempDir, "file2")
+	require.NoError(t, os.WriteFile(file1, []byte("content1"), 0644))
+	require.NoError(t, os.WriteFile(file2, []byte("content2"), 0644))
+
 	s := s3put{
 		AwsKey:        "key",
 		AwsSecret:     "secret",
@@ -452,10 +506,29 @@ func TestContentTypeSaved(t *testing.T) {
 	}
 	s.taskData = client.TaskData{ID: conf.Task.Id, Secret: conf.Task.Secret}
 
-	localFiles := []string{"file1", "file2"}
 	remoteFile := "remote file"
 
-	require.NoError(t, s.attachFiles(ctx, comm, localFiles, remoteFile))
+	file1Info, err := os.Stat(file1)
+	require.NoError(t, err)
+	file2Info, err := os.Stat(file2)
+	require.NoError(t, err)
+
+	uploadedFiles := []s3usage.FileMetrics{
+		{
+			LocalPath:     file1,
+			RemotePath:    remoteFile,
+			FileSizeBytes: file1Info.Size(),
+			PutRequests:   s3usage.CalculatePutRequestsWithContext(s3usage.S3BucketTypeLarge, s3usage.S3UploadMethodPut, file1Info.Size()),
+		},
+		{
+			LocalPath:     file2,
+			RemotePath:    remoteFile,
+			FileSizeBytes: file2Info.Size(),
+			PutRequests:   s3usage.CalculatePutRequestsWithContext(s3usage.S3BucketTypeLarge, s3usage.S3UploadMethodPut, file2Info.Size()),
+		},
+	}
+
+	require.NoError(t, s.attachFiles(ctx, comm, uploadedFiles, remoteFile, conf))
 
 	attachedFiles := comm.AttachedFiles
 	files, ok := attachedFiles[conf.Task.Id]
@@ -514,6 +587,7 @@ func TestS3LocalFilesIncludeFilterPrefix(t *testing.T) {
 				Project:      model.Project{},
 				WorkDir:      dir,
 				BuildVariant: model.BuildVariant{},
+				S3Usage:      &s3usage.S3Usage{},
 			}
 			logger, err := comm.GetLoggerProducer(ctx, &conf.Task, nil)
 			require.NoError(t, err)
@@ -575,6 +649,7 @@ func TestFileUploadNaming(t *testing.T) {
 		Project:      model.Project{},
 		WorkDir:      dir,
 		BuildVariant: model.BuildVariant{},
+		S3Usage:      &s3usage.S3Usage{},
 	}
 	logger, err := comm.GetLoggerProducer(ctx, &conf.Task, nil)
 	require.NoError(t, err)
@@ -655,6 +730,7 @@ func TestPreservePath(t *testing.T) {
 		Project:      model.Project{},
 		WorkDir:      dir,
 		BuildVariant: model.BuildVariant{},
+		S3Usage:      &s3usage.S3Usage{},
 	}
 	logger, err := comm.GetLoggerProducer(ctx, &conf.Task, nil)
 	require.NoError(t, err)
@@ -745,6 +821,7 @@ func TestS3PutSkipExisting(t *testing.T) {
 			},
 		},
 		WorkDir: temproot,
+		S3Usage: &s3usage.S3Usage{},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -792,4 +869,41 @@ func TestS3PutSkipExisting(t *testing.T) {
 
 	_, err = apimodels.ReadLogToSlice(it)
 	require.NoError(t, err)
+}
+
+func TestComputePerFileExtremes(t *testing.T) {
+	t.Run("EmptyInput", func(t *testing.T) {
+		maxPuts, minPuts := computePerFileExtremes(nil)
+		assert.Zero(t, maxPuts)
+		assert.Zero(t, minPuts)
+	})
+	t.Run("SingleFile", func(t *testing.T) {
+		files := []s3usage.FileMetrics{
+			{PutRequests: 5},
+		}
+		maxPuts, minPuts := computePerFileExtremes(files)
+		assert.Equal(t, 5, maxPuts)
+		assert.Equal(t, 5, minPuts)
+	})
+	t.Run("MultipleFiles", func(t *testing.T) {
+		files := []s3usage.FileMetrics{
+			{PutRequests: 3},
+			{PutRequests: 10},
+			{PutRequests: 1},
+			{PutRequests: 7},
+		}
+		maxPuts, minPuts := computePerFileExtremes(files)
+		assert.Equal(t, 10, maxPuts)
+		assert.Equal(t, 1, minPuts)
+	})
+	t.Run("AllSameValue", func(t *testing.T) {
+		files := []s3usage.FileMetrics{
+			{PutRequests: 4},
+			{PutRequests: 4},
+			{PutRequests: 4},
+		}
+		maxPuts, minPuts := computePerFileExtremes(files)
+		assert.Equal(t, 4, maxPuts)
+		assert.Equal(t, 4, minPuts)
+	})
 }

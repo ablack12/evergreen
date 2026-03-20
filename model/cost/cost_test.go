@@ -26,4 +26,14 @@ func TestCostIsZero(t *testing.T) {
 		cost := Cost{OnDemandEC2Cost: 1.5, AdjustedEC2Cost: 1.2}
 		assert.False(t, cost.IsZero())
 	})
+
+	t.Run("NonZeroS3ArtifactPutCost", func(t *testing.T) {
+		cost := Cost{S3ArtifactPutCost: 0.00005}
+		assert.False(t, cost.IsZero())
+	})
+
+	t.Run("NonZeroS3LogPutCost", func(t *testing.T) {
+		cost := Cost{S3LogPutCost: 0.00003}
+		assert.False(t, cost.IsZero())
+	})
 }

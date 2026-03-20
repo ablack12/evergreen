@@ -139,9 +139,6 @@ const (
 	// TaskDescriptionResultsFailed indicates that a task failed because the
 	// test results contained a failure.
 	TaskDescriptionResultsFailed = "test results contained failing test"
-	// TaskDescriptionContainerUnallocatable indicates that the reason a
-	// container task failed is because it cannot be allocated a container.
-	TaskDescriptionContainerUnallocatable = "container task cannot be allocated"
 	// TaskDescriptionAborted indicates that the reason a task failed is specifically
 	// because it was manually aborted.
 	TaskDescriptionAborted = "aborted"
@@ -174,9 +171,6 @@ const (
 	PushLogSuccess = "success"
 
 	HostTypeStatic = "static"
-
-	MergeTestSucceeded = "succeeded"
-	MergeTestFailed    = "failed"
 
 	// MaxAutomaticRestarts is the maximum number of automatic restarts allowed for a task
 	MaxAutomaticRestarts = 1
@@ -242,10 +236,6 @@ const (
 	// automatically restarted via the retry_on_failure command flag.
 	AutoRestartActivator = "automatic_restart"
 
-	// StaleContainerTaskMonitor is the special name representing the unit
-	// responsible for monitoring container tasks that have not dispatched but
-	// have waiting for a long time since their activation.
-	StaleContainerTaskMonitor = "stale-container-task-monitor"
 	// UnderwaterTaskUnscheduler is the caller associated with unscheduling
 	// and disabling tasks older than the task.UnschedulableThreshold from
 	// their distro queue.
@@ -358,6 +348,7 @@ const (
 	KeyTooLargeToIndexError         = "key too large to index"
 	InvalidDivideInputError         = "$divide only supports numeric types"
 	FetchingTaskDataUnfinishedError = "fetching task data not finished"
+	DistroNotFoundForTaskError      = "distro not found"
 
 	// ContainerHealthDashboard is the name of the Splunk dashboard that displays
 	// charts relating to the health of container tasks.
@@ -482,6 +473,9 @@ const (
 	// ModifySpawnHostManual means the spawn host is being modified by the
 	// automatic sleep schedule.
 	ModifySpawnHostSleepSchedule ModifySpawnHostSource = "sleep_schedule"
+	// ModifySpawnHostProjectSettings means the spawn host is being terminated
+	// because the project settings changed to disable debug hosts.
+	ModifySpawnHostProjectSettings ModifySpawnHostSource = "project_settings"
 )
 
 // Common OTEL constants and attribute keys
@@ -499,10 +493,32 @@ const (
 	TaskDescriptionOtelAttribute    = "evergreen.task.description"
 	TaskTagsOtelAttribute           = "evergreen.task.tags"
 	TaskActivatedTimeOtelAttribute  = "evergreen.task.activated_time"
+	TaskIngestTimeOtelAttribute     = "evergreen.task.ingest_time"
 	TaskOnDemandCostOtelAttribute   = "evergreen.task.on_demand_cost"
 	TaskAdjustedCostOtelAttribute   = "evergreen.task.adjusted_cost"
+	TaskGroupOtelAttribute          = "evergreen.task.task_group"
+	TaskGroupMaxHostsOtelAttribute  = "evergreen.task.task_group_max_hosts"
 
-	// task otel attributes
+	// S3 cost tracking otel span name — shared by per-file and aggregate events
+	S3CostTrackingOtelSpanName = "s3-cost-tracking"
+
+	// S3 cost tracking otel attributes — artifact aggregates
+	S3ArtifactPutRequestsOtelAttribute = "evergreen.task.s3_cost.artifact_put_requests"
+	S3ArtifactUploadBytesOtelAttribute = "evergreen.task.s3_cost.artifact_upload_bytes"
+	S3ArtifactCountOtelAttribute       = "evergreen.task.s3_cost.artifact_count"
+	S3ArtifactPutCostOtelAttribute     = "evergreen.task.s3_cost.artifact_put_cost"
+
+	// S3 cost tracking otel attributes — artifact per-file statistics
+	S3ArtifactAvgFilePutCostOtelAttribute         = "evergreen.task.s3_cost.artifact_avg_file_put_cost"
+	S3ArtifactWithMaxPutRequestsCostOtelAttribute = "evergreen.task.s3_cost.artifact_with_max_put_requests_cost"
+	S3ArtifactWithMinPutRequestsCostOtelAttribute = "evergreen.task.s3_cost.artifact_with_min_put_requests_cost"
+
+	// S3 cost tracking otel attributes — log aggregates
+	S3LogPutRequestsOtelAttribute = "evergreen.task.s3_cost.log_put_requests"
+	S3LogUploadBytesOtelAttribute = "evergreen.task.s3_cost.log_upload_bytes"
+	S3LogPutCostOtelAttribute     = "evergreen.task.s3_cost.log_put_cost"
+
+	// display task otel attributes
 	DisplayTaskIDOtelAttribute   = "evergreen.display_task.id"
 	DisplayTaskNameOtelAttribute = "evergreen.display_task.name"
 
@@ -573,8 +589,6 @@ const (
 	TaskSecretHeader    = "Task-Secret"
 	HostHeader          = "Host-Id"
 	HostSecretHeader    = "Host-Secret"
-	PodHeader           = "Pod-Id"
-	PodSecretHeader     = "Pod-Secret"
 	ContentTypeHeader   = "Content-Type"
 	ContentTypeValue    = "application/json"
 	ContentLengthHeader = "Content-Length"

@@ -7,7 +7,6 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/evergreen-ci/evergreen"
 	"github.com/evergreen-ci/evergreen/cloud/userdata"
 	"github.com/evergreen-ci/evergreen/model/distro"
+	"github.com/evergreen-ci/evergreen/model/task"
 	"github.com/evergreen-ci/evergreen/model/user"
 	"github.com/evergreen-ci/evergreen/util"
 	"github.com/evergreen-ci/utility"
@@ -151,14 +151,9 @@ func (h *Host) GetSSHPort() int {
 }
 
 // GetSSHOptions returns the options to SSH into this host from an application
-// server.
-func (h *Host) GetSSHOptions(settings *evergreen.Settings) ([]string, error) {
-	// TODO (DEVPROD-15898): stop providing this key.
-	if _, err := os.Stat(settings.KanopySSHKeyPath); err != nil {
-		return nil, errors.New("Kanopy SSH identity file does not exist")
-	}
-	opts := []string{"-i", settings.KanopySSHKeyPath}
-
+// server. It relies on the SSH key already being loaded in ssh-agent.
+func (h *Host) GetSSHOptions() ([]string, error) {
+	var opts []string
 	var hasKnownHostsFile bool
 	var distroPortOption string
 
@@ -234,7 +229,7 @@ func (h *Host) RunSSHShellScriptWithTimeout(ctx context.Context, script string, 
 
 func (h *Host) runSSHCommandWithOutput(ctx context.Context, addCommands func(*jasper.Command) *jasper.Command, timeout time.Duration) (string, error) {
 	env := evergreen.GetEnvironment()
-	sshOpts, err := h.GetSSHOptions(env.Settings())
+	sshOpts, err := h.GetSSHOptions()
 	if err != nil {
 		return "", errors.Wrap(err, "getting host's SSH options")
 	}
@@ -713,9 +708,9 @@ func (h *Host) RunJasperProcess(ctx context.Context, env evergreen.Environment, 
 		}
 	}
 	if !inMemoryLoggerExists {
-		logger, loggerErr := jasper.NewInMemoryLogger(OutputBufferSize)
+		logger, err := jasper.NewInMemoryLogger(OutputBufferSize)
 		if err != nil {
-			return nil, errors.Wrap(loggerErr, "creating new in-memory logger")
+			return nil, errors.Wrap(err, "creating new in-memory logger")
 		}
 		opts.Output.Loggers = append(opts.Output.Loggers, logger)
 	}
@@ -808,13 +803,13 @@ func (h *Host) JasperClient(ctx context.Context, env evergreen.Environment) (rem
 		return nil, errors.New("hosts without any provisioning method cannot use Jasper")
 	}
 
-	settings := env.Settings()
 	if h.Distro.BootstrapSettings.Communication == distro.CommunicationMethodSSH || h.NeedsReprovision == ReprovisionToLegacy {
-		sshOpts, err := h.GetSSHOptions(settings)
+		sshOpts, err := h.GetSSHOptions()
 		if err != nil {
 			return nil, errors.Wrap(err, "getting host's SSH options")
 		}
 
+		settings := env.Settings()
 		var remoteOpts options.Remote
 		remoteOpts.Host = h.Host
 		remoteOpts.User = h.User
@@ -843,6 +838,7 @@ func (h *Host) JasperClient(ctx context.Context, env evergreen.Environment) (rem
 			return nil, errors.New("cannot resolve Jasper service address if neither host name nor IP is set")
 		}
 
+		settings := env.Settings()
 		addrStr := fmt.Sprintf("%s:%d", hostName, settings.HostJasper.Port)
 
 		serviceAddr, err := net.ResolveTCPAddr("tcp", addrStr)
@@ -1147,6 +1143,9 @@ func (h *Host) spawnHostConfig(ctx context.Context, settings *evergreen.Settings
 		APIKey        string `yaml:"api_key,omitempty"`
 		APIServerHost string `yaml:"api_server_host"`
 		UIServerHost  string `yaml:"ui_server_host"`
+		SpawnHostID   string `yaml:"spawn_host_id,omitempty"`
+		TaskID        string `yaml:"task_id,omitempty"`
+		ProjectID     string `yaml:"project_id,omitempty"`
 		OAuth         struct {
 			Issuer          string `yaml:"issuer"`
 			ClientID        string `yaml:"client_id"`
@@ -1155,6 +1154,23 @@ func (h *Host) spawnHostConfig(ctx context.Context, settings *evergreen.Settings
 		} `yaml:"oauth,omitempty"`
 	}{
 		User: owner.Id,
+	}
+
+	// Only populate the spawn host ID for user-created spawn hosts
+	if h.UserHost {
+		conf.SpawnHostID = h.Id
+
+		// If this host was spawned by a task, include task and project info
+		if h.ProvisionOptions.TaskId != "" {
+			provisionedTask, err := task.FindByIdExecution(ctx, h.ProvisionOptions.TaskId, nil)
+			if err != nil {
+				return nil, errors.Wrapf(err, "getting task '%s' for spawn host config", h.ProvisionOptions.TaskId)
+			}
+			if provisionedTask != nil {
+				conf.TaskID = provisionedTask.Id
+				conf.ProjectID = provisionedTask.Project
+			}
+		}
 	}
 	if settings != nil {
 		if !settings.ServiceFlags.JWTTokenForCLIDisabled {

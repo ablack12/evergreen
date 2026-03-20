@@ -8,7 +8,6 @@ query Web {
 
     ui {
       url
-      helpUrl
       uiv2Url
       parsleyUrl
       httpListenAddr
@@ -23,7 +22,6 @@ query Web {
       stagingEnvironment
       betaFeatures {
         spruceWaterfallEnabled
-        parsleyAIEnabled
       }
     }
     disabledGQLQueries

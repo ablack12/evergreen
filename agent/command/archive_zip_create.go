@@ -28,6 +28,9 @@ type zipArchiveCreate struct {
 	// e.g. "*.zip", "results.out", "ignore/**"
 	ExcludeFiles []string `mapstructure:"exclude_files" plugin:"expand"`
 
+	// Verbose enables per-file logging during archive creation.
+	Verbose bool `mapstructure:"verbose"`
+
 	base
 }
 
@@ -76,9 +79,16 @@ func (c *zipArchiveCreate) Execute(ctx context.Context,
 		return errors.Wrap(err, "finding files to archive")
 	}
 
+	if len(files) == 0 {
+		logger.Task().Warning("No files to archive.")
+	}
+
 	filenames := make([]string, len(files))
 	for idx := range files {
 		filenames[idx] = files[idx].path
+		if c.Verbose {
+			logger.Task().Infof("Adding to archive: %s", filenames[idx])
+		}
 	}
 
 	if err := archiver.NewZip().Archive(filenames, c.Target); err != nil {

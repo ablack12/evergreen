@@ -16,6 +16,7 @@ import (
 	"github.com/evergreen-ci/evergreen/apimodels"
 	"github.com/evergreen-ci/evergreen/model"
 	"github.com/evergreen-ci/evergreen/model/patch"
+	"github.com/evergreen-ci/evergreen/model/s3usage"
 	"github.com/evergreen-ci/pail"
 	"github.com/evergreen-ci/utility"
 	"github.com/mongodb/grip"
@@ -55,6 +56,8 @@ type taskContext struct {
 	oomTracker    jasper.OOMTracker
 	traceID       string
 	diskDevices   []string
+	// s3Usage tracks S3 API usage accumulated during task execution
+	s3Usage s3usage.S3Usage
 	// taskCleanups and taskGroupCleanups store the cleanup commands for the
 	// task and setup group, respectively.
 	taskCleanups       []internal.CommandCleanup
@@ -315,19 +318,72 @@ func (tc *taskContext) getTimeoutType() globals.TimeoutType {
 func (tc *taskContext) getExecTimeout() time.Duration {
 	tc.RLock()
 	defer tc.RUnlock()
+
 	if dynamicTimeout := tc.taskConfig.GetExecTimeout(); dynamicTimeout > 0 {
 		if tc.taskConfig.MaxExecTimeoutSecs != 0 && dynamicTimeout > tc.taskConfig.MaxExecTimeoutSecs {
 			return time.Duration(tc.taskConfig.MaxExecTimeoutSecs) * time.Second
 		}
 		return time.Duration(dynamicTimeout) * time.Second
 	}
-	if pt := tc.taskConfig.Project.FindProjectTask(tc.taskConfig.Task.DisplayName); pt != nil && pt.ExecTimeoutSecs > 0 {
-		return time.Duration(pt.ExecTimeoutSecs) * time.Second
+
+	bvTask := tc.taskConfig.Project.FindTaskForVariant(
+		tc.taskConfig.Task.DisplayName,
+		tc.taskConfig.Task.BuildVariant,
+	)
+	if bvTask != nil && bvTask.ExecTimeoutSecs > 0 {
+		return time.Duration(bvTask.ExecTimeoutSecs) * time.Second
 	}
+
 	if tc.taskConfig.Project.ExecTimeoutSecs > 0 {
 		return time.Duration(tc.taskConfig.Project.ExecTimeoutSecs) * time.Second
 	}
 	return globals.DefaultExecTimeout
+}
+
+// getPSCommand retrieves the ps command from the task configuration following the priority order:
+// 1. Build variant task-level PS
+// 2. Project task-level PS
+// 3. Project-level PS
+// 4. Expansion fallback (only when PSLoggingDisabled=false for backward compatibility)
+// The value is expanded to support users specifying expansions in YAML (e.g., ps: "${my_ps}").
+func (tc *taskContext) getPSCommand() string {
+	tc.RLock()
+	defer tc.RUnlock()
+
+	// Check build variant task-level PS (highest priority).
+	bvTask := tc.taskConfig.Project.FindBuildVariantTaskUnit(
+		tc.taskConfig.Task.BuildVariant,
+		tc.taskConfig.Task.DisplayName,
+	)
+	if bvTask != nil && bvTask.PS != nil {
+		ps, _ := tc.taskConfig.Expansions.ExpandString(*bvTask.PS)
+		return ps
+	}
+
+	// Check project task-level PS (second priority).
+	projectTask := tc.taskConfig.Project.FindProjectTask(tc.taskConfig.Task.DisplayName)
+	if projectTask != nil && projectTask.PS != nil {
+		ps, _ := tc.taskConfig.Expansions.ExpandString(*projectTask.PS)
+		return ps
+	}
+
+	// Check project-level PS (third priority).
+	if tc.taskConfig.Project.PS != "" {
+		ps, _ := tc.taskConfig.Expansions.ExpandString(tc.taskConfig.Project.PS)
+		return ps
+	}
+
+	// For backward compatibility: when PSLoggingDisabled=false, fall back to ps expansion.
+	// This allows distro/build variant expansions to work for existing projects.
+	if !tc.taskConfig.PSLoggingDisabled {
+		if psExpansion := tc.taskConfig.Expansions.Get("ps"); psExpansion != "" {
+			return psExpansion
+		}
+		// Default to "ps" when PSLoggingDisabled is false and no expansion is set.
+		return "ps"
+	}
+
+	return ""
 }
 
 // makeTaskConfig fetches task configuration data required to run the task from the API server.
@@ -407,6 +463,7 @@ func (a *Agent) makeTaskConfig(ctx context.Context, tc *taskContext) (*internal.
 	}
 	taskConfig.TaskOutput = a.opts.SetupData.TaskOutput
 	taskConfig.MaxExecTimeoutSecs = a.opts.SetupData.MaxExecTimeoutSecs
+	taskConfig.PSLoggingDisabled = a.opts.SetupData.PSLoggingDisabled
 
 	// Set AWS credentials for task output buckets.
 	awsCreds := pail.CreateAWSStaticCredentials(taskConfig.TaskOutput.Key, taskConfig.TaskOutput.Secret, "")

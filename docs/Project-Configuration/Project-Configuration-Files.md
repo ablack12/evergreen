@@ -276,7 +276,7 @@ Fields:
   non-module related build variant fields ([context](../decisions/2024-07-18_allow_module_expansions)).
 - `tasks`: a list of tasks to run, referenced either by task name or by tags.
   Tasks listed here can also include other task-level fields, such as
-  `batchtime`, `cron`, `activate`, `depends_on`, `stepback`, and `run_on`.
+  `batchtime`, `cron`, `activate`, `depends_on`, `stepback`, `run_on`, and `ps`.
   We can also [define when a task will run](#controlling-when-tasks-and-variants-run). If there are
   conflicting settings definitions at different levels, the order of priority
   is defined [here](#task-fields-override-hierarchy).
@@ -557,13 +557,14 @@ Parameters:
 **Exec timeout: exec_timeout_secs**
 You can customize the points at which the "timeout" conditions are
 triggered. To cause a task to stop (and fail) if it doesn't complete
-within an allotted time, set the key `exec_timeout_secs` on the overall project
-or on a specific task to set the maximum allowed length of execution time. Exec timeout only
+within an allotted time, set the key `exec_timeout_secs` on the overall project,
+on a build variant, on a specific task, or on a specific task within a build variant to set the maximum allowed length of execution time. Exec timeout only
 applies to commands that run in `pre`, `setup_group`, `setup_task`, and the main
 task commands; it does not apply to the `post`, `teardown_task`, and
 `teardown_group` blocks. This timeout defaults to 6 hours, and cannot be set above 24 hours.
-`exec_timeout_secs` can only be set on the project or on a task as seen in below example.
-It cannot be set on functions or build variant tasks.
+`exec_timeout_secs` can be set on the project, on a build variant, on a task, or on a task within a build variant as
+seen in below example. The precedence order is: build variant task `>` project task `>` build variant `>` project. It
+cannot be set on functions.
 
 You can also set `exec_timeout_secs` using [timeout.update](Project-Commands#timeoutupdate).
 
@@ -594,16 +595,31 @@ buildvariants:
       - localtestdistro
     tasks:
       - name: compile
+      - name: test
+        exec_timeout_secs: 30 ## override the project, task, and build variant level exec_timeout_secs for this variant's test task
+  - name: linux
+    display_name: Linux
+    exec_timeout_secs: 120 ## override the project exec_timeout_secs for all tasks in this variant.
+    run_on:
+      - localtestdistro2
+    tasks:
+      - name: compile
 
 tasks:
-  name: compile
-  commands:
-    - command: shell.exec
-      timeout_secs: 10 ## override the project level timeout_secs defined above and force this command to fail if it stays "idle" for 10 seconds or more
-      exec_timeout_secs: 20 ## will override the project level exec_timeout_secs defined above for this task
-      params:
-        script: |
-          sleep 1000
+  - name: compile
+    commands:
+      - command: shell.exec
+        timeout_secs: 10 ## override the project level timeout_secs defined above and force this command to fail if it stays "idle" for 10 seconds or more
+        params:
+          script: |
+            sleep 1000
+  - name: test
+    exec_timeout_secs: 20 ## will override the project level exec_timeout_secs defined above for this task
+    commands:
+      - command: shell.exec
+        params:
+          script: |
+            echo "running tests"
 ```
 
 ### Controlling When Tasks and Variants Run
@@ -704,6 +720,8 @@ You can control when tasks and build variants run based on which files have chan
 For mainline version, we will not automatically run tasks if they are filtered out, and we will not create PR patches/tasks if filtered out, but instead send a successful status for all required
 checks as well as the base `evergreen` check.
 
+For merge queue filtering, take a look at build variant path filtering.
+
 #### Project-Level File Ignoring
 
 Some commits to your repository don't need to be tested. The obvious
@@ -725,24 +743,36 @@ ignore:
   - "!testdata/sample.txt" ## EXCEPT for changes to this txt file that's part of a test suite
 ```
 
-In the above example, a commit that only changes `README.md` would not
+In the above example, a commit that only changes `README.md` would ~~not~~
 be automatically scheduled, since `*.md` is ignored. A commit that
 changes both `README.md` and `important_file.cpp` _would_ schedule
 tasks, since only some of the commit's changed files are ignored.
 
+**Ignore is currently not considered for merge queue patches.**
+
 ##### Build Variant Path Filtering
 
 Build variants can specify `paths` gitignore-style patterns to define which files should trigger the variant when
-changed. This is the opposite of ignoring - it defines what files the variant cares about.
-**Note that ignored files take precedence over paths:** if a file is ignored, it will not run the variant even if
-the path filter would have matched it.
+changed. This is the opposite of ignoring -- it defines what files the variant cares about and prevents tasks
+from running if a specified file has not changed. However, this does _not_ mean that the variant will automatically
+be scheduled if a file in a specified path is changed. The tasks must still be manually selected to run through
+manual selection, alias, etc.
 
-Note: specifying paths could cause crons to not activate the build variants if the path filter does not match.
+_Merge queue behavior_: Build variant path filtering applies to the merge queue unless
+[explicitly disabled](#disabling-merge-queue-path-filtering). If testing multiple PRs in one merge queue patch,
+we will consider the full set of changed files to determine what tasks to run, but will
+not consider the changed files from other PRs in the merge group (i.e. paths changed in PRs that are ahead in the queue are not included).
+For PR patches and the merge queue, we will still send a successful check for ignored variants, to avoid blocking requirements.
+
+_Mainline behavior_: Cron, batchtime, and activate true/false will still take precedent over path filtering,
+as those settings are meant to ensure consistent testing, rather than relevant changes.
+
+_Interaction with ignore_: Because ignored files take precedent over build variant path filtering, if a file is ignored,
+it will not run the variant even if the path filter would have matched it (except in the merge queue, where include is not currently supported).
 
 Full gitignore syntax is explained
 [here](https://git-scm.com/docs/gitignore). Ignored variants may still
-be scheduled manually, and their tasks will still be scheduled on
-failure stepback. For PR patches, we will still send a successful check for ignored variants, to avoid blocking requirements.
+be scheduled manually, and their tasks will still be scheduled on failure stepback.
 
 ```yaml
 buildvariants:
@@ -768,6 +798,21 @@ When a build variant has `paths` defined:
 **Note: build variant path filtering is ignored on extremely large GitHub PRs with 3000+ files changed.** If a PR
 contains 3000+ changed files, `paths` will have no effect on the GitHub PR patch. The build variant will run its tasks
 even if `paths` doesn't match any of the changed files.
+
+###### Disabling Merge Queue Path Filtering
+
+If you want to disable path filtering specifically for merge queue versions while keeping it enabled for PR patches,
+you can set the `disable_merge_queue_path_filtering` top-level setting to `true`. When enabled, all build variants
+will run for merge queue versions regardless of their `paths` configuration, but path filtering will still apply
+to PR patches.
+
+This can be useful when you want more selective testing for PR patches but want to ensure comprehensive testing
+before merging to your main branch.
+
+```yaml
+disable_merge_queue_path_filtering: true
+buildvariants: ...
+```
 
 ### Expansions
 
@@ -909,6 +954,13 @@ Every task has some expansions available by default:
   author name in patches
 - `${task_id}` is the task's unique id
 - `${task_name}` is the name of the task
+- `${timed_out_command_pid}` is the PID of the evergreen command that timed out,
+  if the task has timed out. It is only available in the `timeout` task block.
+- `${timed_out_pids}` is a comma separated list of all PIDs that were running when the task's
+  timeout limit exceeded. It is only available in the `timeout` task block.
+- `${timed_out_child_pids}` is a comma separated list of descendant PIDs (child processes) of
+  the processes that were running when the task's timeout limit exceeded.
+  It is only available in the `timeout` task block.
 - `${triggered_by_git_tag}` is the name of the tag that triggered this
   version, if applicable
 - `${version_id}` is the id of the task's version
@@ -954,9 +1006,7 @@ inter-project dependency:
 The following expansions are available if a task was created with a [patch trigger alias](Project-and-Distro-Settings#patch-trigger-aliases):
 
 - `${parent_patch_id}` is the ID of the parent patch for this task
-- `${parent_github_org}` is the Github org for the parent patch
-- `${parent_github_repo}` is the Github repo for the parent patch
-- `${parent_github_branch}` is the branch tracked by the parent patch
+- `{parent_project_module}` is the name of the parent module in the downstream project (i.e. defined on the upstream project's Child Patch Trigger Alias as "module")
 
 The following expansions are available if a task has modules, where `<module_name>` represents the name defined in the project yaml for a
 given module:
@@ -1145,6 +1195,97 @@ To disable the OOM tracker, add the following to the top-level of your yaml.
 
 ```yaml
 oom_tracker: false
+```
+
+### Process Diagnostics: ps
+
+You can enable process logging by setting the `ps` field at multiple configuration levels. The specified command will run every 60 seconds during task execution to log process information.
+
+To disable process logging, either omit the `ps` field or set it to an empty string.
+
+The `ps` field follows a priority order (from highest to lowest):
+
+1. **Build variant task level** - Overrides all other settings
+2. **Project task level** - Overrides project-level settings
+3. **Project level** - Base configuration for all tasks
+
+To use an expansion, reference it with `ps: "${my_custom_ps}"` at the desired level.
+
+**Project level**:
+
+```yaml
+ps: "ps -o pid" # Enable for all tasks
+
+tasks:
+  - name: my_task
+    commands:
+      - command: shell.exec
+        params:
+          script: echo "Running with ps logging"
+```
+
+**Task level** (overrides project level):
+
+```yaml
+tasks:
+  - name: task_with_custom_ps
+    ps: "ps -o pid,tty,time,comm,args" # Custom ps command for this task
+    commands:
+      - command: shell.exec
+        params:
+          script: echo "Running with custom ps"
+
+  - name: task_without_ps
+    ps: "" # Explicitly disable ps logging
+    commands:
+      - command: shell.exec
+        params:
+          script: echo "No ps logging"
+```
+
+**Build variant task level** (highest priority, overrides task level and project level):
+
+```yaml
+ps: "ps -o pid" # Project-level
+
+tasks:
+  - name: my_task_1
+    ps: "ps -o pid,tty,time,comm,args" # Task-level
+    commands:
+      - command: shell.exec
+        params:
+          script: echo "Task execution"
+
+  - name: my_task_2
+    ps: "ps -o pid,tty,time,comm,args" # Task-level
+    commands:
+      - command: shell.exec
+        params:
+          script: echo "Custom ps task"
+
+  - name: other_task
+    commands:
+      - command: shell.exec
+        params:
+          script: echo "Task without explicit ps"
+
+  - name: task_with_expansion
+    ps: "${my_custom_ps}" # Reference expansion defined in build variant
+    commands:
+      - command: shell.exec
+        params:
+          script: echo "Task using expansion"
+
+buildvariants:
+  - name: ubuntu2204
+    expansions:
+      my_custom_ps: "ps -o pid,user,comm" # Define custom ps command as expansion
+    tasks:
+      - name: my_task_1
+        ps: "ps -o pid,tty,time" # Build variant task-level: overrides task and project level ps.
+      - name: my_task_2 # Uses task-level "ps -o pid,tty,time,comm,args" since there is no build variant task-level override.
+      - name: other_task # Uses project-level "ps -o pid" since no task-level or build variant task-level ps is set.
+      - name: task_with_expansion # Uses "ps -o pid,user,comm" from the my_custom_ps expansion defined at task level.
 ```
 
 ### Matrix Variant Definition
@@ -1631,6 +1772,7 @@ For that same reason, teardown groups also cannot run the [manually set task sta
 #### The following constraints apply to single host task groups
 
 - If tasks in a single host task groups have dependencies on another task outside the group, only the first task in the task group should list those dependencies. If a task in the group other than the first one have dependencies outside of the group, the task can be blocked waiting for external dependencies to complete and result in the host being terminated for idleness.
+- Tasks in a task group will depend on all previous tasks in the group, but not later tasks in the group.
 
 Tasks in a group will be displayed as
 separate tasks. Users can use display tasks if they wish to group the
@@ -1693,7 +1835,9 @@ parameters are available:
 - `omit_generated_tasks` - boolean (default: false). If true and the
   dependency is a generator task (i.e. it generates tasks via the
   [`generate.tasks`](Project-Commands#generatetasks) command), then generated tasks will not be included
-  as dependencies.
+  as dependencies. By default, this is false, which means adding a generator
+  task as a dependency will also add dependencies on all of their generated
+  tasks.
 
 So, for example:
 
@@ -1801,6 +1945,49 @@ tasks:
     commands:
       - func: my_function
 ```
+
+### Update Distros with Run On
+
+Test owners and Product teams should be confident and empowered to modify their distros as they see fit.
+DevProd cannot scale to adjust individual distros for individual teams; we do own the framework that gives you the ability to modify the distros.
+
+#### Adjust Distro Size
+
+Larger distros increase costs, and should only be increased when necessary.
+It is best to try to understand the underlying root cause of the issue to avoid altogether.
+Specifying larger distros should be a last resort.
+
+##### Example in a variant
+
+Specify that all tasks in the build variant should use a different sized distro.
+
+```yaml
+buildvariants:
+  - name: your-build-variant-name
+    display_name: "~ Your Variant"
+    run_on:
+      - rhel8.8-xlarge
+```
+
+Read more about the run_on field [here](Project-Configuration-Files#build-variants).
+
+##### Example in a task
+
+```yaml
+buildvariants:
+  - name: your-build-variant-name
+    display_name: "~ Your Variant"
+    run_on:
+      - rhel8.8-small
+    tasks:
+      - name: .tests_that_need_xlarge_distros
+        distros:
+          - rhel8.8-xlarge
+```
+
+There may be further changes you can do within your team using **variables or expansions**. It's good
+to reach out to your team for further advice here. For example, server's resmoke test configurations are
+documented [here](https://github.com/mongodb/mongo-task-generator/blob/master/docs/generating_tasks.md#runtime-based-sub-tasks).
 
 ### The Power of YAML
 

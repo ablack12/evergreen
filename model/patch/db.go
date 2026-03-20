@@ -49,7 +49,7 @@ var (
 	ProjectStorageMethodKey = bsonutil.MustHaveTag(Patch{}, "ProjectStorageMethod")
 	PatchedProjectConfigKey = bsonutil.MustHaveTag(Patch{}, "PatchedProjectConfig")
 	AliasKey                = bsonutil.MustHaveTag(Patch{}, "Alias")
-	githubMergeDataKey      = bsonutil.MustHaveTag(Patch{}, "GithubMergeData")
+	GithubMergeDataKey      = bsonutil.MustHaveTag(Patch{}, "GithubMergeData")
 	githubPatchDataKey      = bsonutil.MustHaveTag(Patch{}, "GithubPatchData")
 	MergePatchKey           = bsonutil.MustHaveTag(Patch{}, "MergePatch")
 	TriggersKey             = bsonutil.MustHaveTag(Patch{}, "Triggers")
@@ -75,7 +75,13 @@ var (
 	githubPatchHeadOwnerKey = bsonutil.MustHaveTag(thirdparty.GithubPatch{}, "HeadOwner")
 
 	// BSON fields for thirdparty.GithubMergeGroup
-	githubMergeGroupHeadSHAKey = bsonutil.MustHaveTag(thirdparty.GithubMergeGroup{}, "HeadSHA")
+	githubMergeGroupOrgKey                   = bsonutil.MustHaveTag(thirdparty.GithubMergeGroup{}, "Org")
+	githubMergeGroupRepoKey                  = bsonutil.MustHaveTag(thirdparty.GithubMergeGroup{}, "Repo")
+	githubMergeGroupHeadSHAKey               = bsonutil.MustHaveTag(thirdparty.GithubMergeGroup{}, "HeadSHA")
+	githubMergeGroupRemovedFromQueueAtKey    = bsonutil.MustHaveTag(thirdparty.GithubMergeGroup{}, "RemovedFromQueueAt")
+	githubMergeGroupRemovalReasonKey         = bsonutil.MustHaveTag(thirdparty.GithubMergeGroup{}, "RemovalReason")
+	GithubMergeGroupGitRefNotFoundKey        = bsonutil.MustHaveTag(thirdparty.GithubMergeGroup{}, "GitRefNotFound")
+	githubMergeGroupInvalidatedByUpstreamKey = bsonutil.MustHaveTag(thirdparty.GithubMergeGroup{}, "InvalidatedByUpstream")
 )
 
 // ProjectCreateTimeIndex is a partial index used to speed up finding GitHub Merge Queue patches
@@ -179,8 +185,8 @@ var requesterExpression = bson.M{
 				"case": bson.M{
 					"$or": []bson.M{
 						{"$and": []bson.M{
-							{"$ifNull": []any{"$" + githubMergeDataKey, false}},
-							{"$ne": []string{"$" + bsonutil.GetDottedKeyName(githubMergeDataKey, githubMergeGroupHeadSHAKey), ""}},
+							{"$ifNull": []any{"$" + GithubMergeDataKey, false}},
+							{"$ne": []string{"$" + bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupHeadSHAKey), ""}},
 						}},
 						{"$eq": []string{"$" + AliasKey, evergreen.CommitQueueAlias}},
 					},
@@ -230,7 +236,7 @@ func buildPatchFilterPipeline(opts ProjectOrUserPatchesOptions, includeSort bool
 	if onlyMergeQueue {
 		match["$or"] = []bson.M{
 			{
-				bsonutil.GetDottedKeyName(githubMergeDataKey, githubMergeGroupHeadSHAKey): bson.M{
+				bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupHeadSHAKey): bson.M{
 					"$exists": true,
 					"$ne":     "",
 				},
@@ -537,4 +543,160 @@ func GetFinalizedChildPatchIdsForPatch(ctx context.Context, patchID string) ([]s
 		}
 	}
 	return res, nil
+}
+
+// FindMergeQueuePatchesByProject returns all active merge queue patches for a project
+func FindMergeQueuePatchesByProject(ctx context.Context, projectID string) ([]Patch, error) {
+	timeThreshold := time.Now().Add(-24 * time.Hour)
+
+	query := bson.M{
+		ProjectKey: projectID,
+		AliasKey:   evergreen.CommitQueueAlias,
+		StatusKey: bson.M{
+			"$nin": []string{evergreen.VersionFailed, evergreen.VersionSucceeded},
+		},
+		CreateTimeKey: bson.M{
+			"$gte": timeThreshold,
+		},
+		bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupRemovedFromQueueAtKey): bson.M{
+			"$exists": false,
+		},
+	}
+
+	return Find(ctx, db.Query(query))
+}
+
+// determineInvalidatedByUpstream determines if a merge queue patch was invalidated due to
+// upstream failure rather than its own failure.
+func determineInvalidatedByUpstream(ctx context.Context, p *Patch, reason string, removalTime time.Time) bool {
+	// Only determine upstream failure for the "invalidated" reason.
+	// "dequeued" represents manual removal (not upstream failure).
+	// "merged" represents successful merge.
+	if reason != thirdparty.MergeQueueReasonInvalidated {
+		return false
+	}
+
+	// Check if GitRefNotFound was already set by the agent. This handles a potential race condition where
+	// GitHub invalidates the merge queue entry and deletes the ref. The agent then tries to clone but fails
+	// because the ref is already gone (setting GitRefNotFound), after which the webhook arrives. The combination of
+	// GitRefNotFound being set and the removal reason being "invalidated" tells us this was an upstream
+	// failure.
+	if p.GithubMergeData.GitRefNotFound {
+		return true
+	}
+
+	if p.Version == "" {
+		// No version was created yet, indicating an upstream failure.
+		return true
+	}
+
+	isFinished := p.IsFinished()
+	status := p.Status
+
+	// If the patch is still running or succeeded, this indicates that the patch wasn't
+	// removed due to its own task's failures and instead indicates an upstream failure.
+	if !isFinished || status == evergreen.VersionSucceeded {
+		return true
+	}
+
+	// Check if the patch was removed from the queue before it finished.
+	// If RemovedFromQueueAt is before FinishTime, the patch was invalidated while running,
+	// indicating an upstream failure rather than its own failure.
+	if !p.FinishTime.IsZero() && removalTime.Before(p.FinishTime) {
+		return true
+	}
+
+	return false
+}
+
+// groupPatchesAndBuildUpdates groups patches by whether they were invalidated due to
+// upstream failures or their own failures, and builds the corresponding update documents.
+func groupPatchesAndBuildUpdates(ctx context.Context, patches []Patch, reason string, removalTime time.Time) (
+	patchesInvalidatedByUpstream []mgobson.ObjectId, updateForUpstream bson.M,
+	patchesOwnFailure []mgobson.ObjectId, updateForOwnFailure bson.M) {
+
+	for _, p := range patches {
+		if determineInvalidatedByUpstream(ctx, &p, reason, removalTime) {
+			patchesInvalidatedByUpstream = append(patchesInvalidatedByUpstream, p.Id)
+		} else {
+			patchesOwnFailure = append(patchesOwnFailure, p.Id)
+		}
+	}
+
+	updateForUpstream = bson.M{
+		"$set": bson.M{
+			bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupRemovedFromQueueAtKey):    removalTime,
+			bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupRemovalReasonKey):         reason,
+			bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupInvalidatedByUpstreamKey): true,
+		},
+	}
+
+	updateForOwnFailure = bson.M{
+		"$set": bson.M{
+			bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupRemovedFromQueueAtKey):    removalTime,
+			bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupRemovalReasonKey):         reason,
+			bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupInvalidatedByUpstreamKey): false,
+		},
+	}
+
+	return patchesInvalidatedByUpstream, updateForUpstream, patchesOwnFailure, updateForOwnFailure
+}
+
+// MarkMergeQueuePatchesRemovedFromQueue updates patches matching the given HeadSHA to mark them
+// as removed from the GitHub merge queue. Returns the IDs of patches that were updated.
+func MarkMergeQueuePatchesRemovedFromQueue(ctx context.Context, org, repo, headSHA, reason string) ([]string, error) {
+	if headSHA == "" {
+		return nil, errors.New("headSHA cannot be empty")
+	}
+	if reason == "" {
+		return nil, errors.New("reason cannot be empty")
+	}
+
+	query := bson.M{
+		bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupOrgKey):     org,
+		bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupRepoKey):    repo,
+		bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupHeadSHAKey): headSHA,
+		bsonutil.GetDottedKeyName(GithubMergeDataKey, githubMergeGroupRemovedFromQueueAtKey): bson.M{
+			"$exists": false,
+		},
+	}
+
+	patches, err := Find(ctx, db.Query(query))
+	if err != nil {
+		return nil, errors.Wrap(err, "finding patches")
+	}
+
+	if len(patches) == 0 {
+		return nil, nil
+	}
+
+	removalTime := time.Now().UTC().Round(time.Millisecond)
+
+	patchesInvalidatedByUpstream, updateForUpstream, patchesOwnFailure, updateForOwnFailure :=
+		groupPatchesAndBuildUpdates(ctx, patches, reason, removalTime)
+
+	updatedPatchIDs := []string{}
+
+	updates := []struct {
+		patches []mgobson.ObjectId
+		update  bson.M
+		errMsg  string
+	}{
+		{patchesInvalidatedByUpstream, updateForUpstream, "updating patches invalidated by upstream"},
+		{patchesOwnFailure, updateForOwnFailure, "updating patches with own failures"},
+	}
+
+	for _, u := range updates {
+		if len(u.patches) > 0 {
+			_, err := UpdateAll(ctx, bson.M{IdKey: bson.M{"$in": u.patches}}, u.update)
+			if err != nil {
+				return updatedPatchIDs, errors.Wrap(err, u.errMsg)
+			}
+			for _, id := range u.patches {
+				updatedPatchIDs = append(updatedPatchIDs, id.Hex())
+			}
+		}
+	}
+
+	return updatedPatchIDs, nil
 }
