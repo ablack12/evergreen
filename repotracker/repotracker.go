@@ -787,7 +787,7 @@ func resolveUserFromMetadata(ctx context.Context, metadata model.VersionMetadata
 		usr, err = user.FindOneById(ctx, derivedID)
 		catcher.Add(err)
 	}
-	grip.ErrorWhen(usr == nil, message.Fields{
+	grip.DebugWhen(usr == nil, message.Fields{
 		"message":             "failed to resolve Evergreen user for version",
 		"git_tag_pusher":      metadata.GitTag.Pusher,
 		"revision_author_uid": metadata.Revision.AuthorGithubUID,
