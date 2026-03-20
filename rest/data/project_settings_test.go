@@ -1348,6 +1348,47 @@ func TestCopyProject(t *testing.T) {
 			assert.Error(t, err)
 			assert.Nil(t, newProject)
 		},
+		"CopiedPerfEnabledProjectHasMatchingIdAndIdentifier": func(t *testing.T, ref model.ProjectRef) {
+			perfRef := model.ProjectRef{
+				Id:          "perfId",
+				Identifier:  "perfId",
+				Owner:       "evergreen-ci",
+				Repo:        "evergreen",
+				Branch:      "main",
+				Restricted:  utility.FalsePtr(),
+				Enabled:     true,
+				Admins:      []string{"oldAdmin"},
+				PerfEnabled: utility.TruePtr(),
+			}
+			require.NoError(t, perfRef.Insert(t.Context()))
+
+			copyProjectOpts := restModel.CopyProjectOpts{
+				ProjectIdToCopy:      perfRef.Id,
+				NewProjectIdentifier: "myPerfCopy",
+				NewProjectId:         "someOtherId",
+			}
+			newProject, err := CopyProject(ctx, env, copyProjectOpts)
+			assert.NoError(t, err)
+			require.NotNil(t, newProject)
+			assert.Equal(t, "myPerfCopy", utility.FromStringPtr(newProject.Identifier))
+			// When perf is enabled, ID must equal identifier.
+			assert.Equal(t, utility.FromStringPtr(newProject.Identifier), utility.FromStringPtr(newProject.Id))
+			assert.True(t, utility.FromBoolPtr(newProject.PerfEnabled))
+		},
+		"CopiedNonPerfProjectDoesNotHaveMatchingIdAndIdentifier": func(t *testing.T, ref model.ProjectRef) {
+			copyProjectOpts := restModel.CopyProjectOpts{
+				ProjectIdToCopy:      ref.Id,
+				NewProjectIdentifier: "myNonPerfCopy",
+				NewProjectId:         "differentId",
+			}
+			newProject, err := CopyProject(ctx, env, copyProjectOpts)
+			assert.NoError(t, err)
+			require.NotNil(t, newProject)
+			assert.Equal(t, "myNonPerfCopy", utility.FromStringPtr(newProject.Identifier))
+			assert.Equal(t, "differentId", utility.FromStringPtr(newProject.Id))
+			// ID and identifier should not match when perf is not enabled.
+			assert.NotEqual(t, utility.FromStringPtr(newProject.Id), utility.FromStringPtr(newProject.Identifier))
+		},
 	} {
 		assert.NoError(t, db.ClearCollections(model.ProjectRefCollection, model.ProjectVarsCollection, fakeparameter.Collection, model.ProjectAliasCollection,
 			event.SubscriptionsCollection, event.EventCollection, evergreen.ScopeCollection, user.Collection))
