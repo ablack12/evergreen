@@ -1365,13 +1365,11 @@ func TestCopyProject(t *testing.T) {
 			copyProjectOpts := restModel.CopyProjectOpts{
 				ProjectIdToCopy:      perfRef.Id,
 				NewProjectIdentifier: "myPerfCopy",
-				NewProjectId:         "someOtherId",
 			}
 			newProject, err := CopyProject(ctx, env, copyProjectOpts)
 			assert.NoError(t, err)
 			require.NotNil(t, newProject)
 			assert.Equal(t, "myPerfCopy", utility.FromStringPtr(newProject.Identifier))
-			// When perf is enabled, ID must equal identifier.
 			assert.Equal(t, utility.FromStringPtr(newProject.Identifier), utility.FromStringPtr(newProject.Id))
 			assert.True(t, utility.FromBoolPtr(newProject.PerfEnabled))
 		},
@@ -1379,14 +1377,12 @@ func TestCopyProject(t *testing.T) {
 			copyProjectOpts := restModel.CopyProjectOpts{
 				ProjectIdToCopy:      ref.Id,
 				NewProjectIdentifier: "myNonPerfCopy",
-				NewProjectId:         "differentId",
 			}
 			newProject, err := CopyProject(ctx, env, copyProjectOpts)
 			assert.NoError(t, err)
 			require.NotNil(t, newProject)
 			assert.Equal(t, "myNonPerfCopy", utility.FromStringPtr(newProject.Identifier))
-			assert.Equal(t, "differentId", utility.FromStringPtr(newProject.Id))
-			// ID and identifier should not match when perf is not enabled.
+			assert.NotEqual(t, "myNonPerfCopy", utility.FromStringPtr(newProject.Id))
 			assert.NotEqual(t, utility.FromStringPtr(newProject.Id), utility.FromStringPtr(newProject.Identifier))
 		},
 	} {
