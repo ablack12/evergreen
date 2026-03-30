@@ -84,6 +84,7 @@
       "r": "github_pull_request",
       "status": "undispatched",
       "activated": false,
+      "display_status_cache": "unscheduled",
       "branch": "spruce",
       "distro": "macos-1014",
       "execution": 1,

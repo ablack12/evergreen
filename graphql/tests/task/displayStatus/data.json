@@ -80,6 +80,7 @@
                 "$numberLong": "22722855668"
             },
             "has_annotations": true,
+            "display_status_cache": "known-issue",
             "duration_prediction": {
                 "value": {
                     "$numberLong": "49219471754"
