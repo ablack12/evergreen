@@ -83,8 +83,11 @@ var (
 type Task struct {
 	Id     string `bson:"_id" json:"id"`
 	Secret string `bson:"secret" json:"secret"`
-	// time information for task
-	// CreateTime - the creation time for the task, derived from the commit time or the patch creation time.
+	// Time fields (see also model.Version for the same CreateTime vs IngestTime distinction):
+	// CreateTime - logical time for this task, aligned with the parent version's semantics: derived from
+	// commit/revision metadata or patch timing (same idea as the version's CreateTime). It is not the
+	// wall-clock time the task row was written; use IngestTime for that.
+	// IngestTime - wall-clock time this task document was first inserted in Evergreen (set in createOneTask).
 	// DispatchTime - the time the task runner starts up the agent on the host.
 	// ScheduledTime - the time the task is scheduled.
 	// StartTime - the time the agent starts the task on the host after spinning it up.
@@ -647,8 +650,13 @@ func (t *Task) DependenciesMet(ctx context.Context, depCaches map[string]Task) (
 	}
 
 	t.setDependenciesMetTime()
+	// Use a detached context for this non-critical cache write so it can
+	// succeed even if the caller's context (e.g. the scheduler deadline)
+	// has expired.
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer writeCancel()
 	err = UpdateOne(
-		ctx,
+		writeCtx,
 		bson.M{IdKey: t.Id},
 		bson.M{
 			"$set": bson.M{
@@ -3532,7 +3540,7 @@ func (t *Task) FetchExpectedDuration(ctx context.Context) util.DurationStats {
 
 	refresher := func(previous util.DurationStats) (util.DurationStats, bool) {
 		defaultVal := util.DurationStats{Average: defaultTaskDuration, StdDev: 0}
-		vals, err := getExpectedDurationsForWindow(t.DisplayName, t.Project, t.BuildVariant,
+		vals, err := getExpectedDurationsForWindow(ctx, t.DisplayName, t.Project, t.BuildVariant,
 			time.Now().Add(-taskCompletionEstimateWindow), time.Now())
 		grip.Notice(ctx, message.WrapError(err, message.Fields{
 			"name":      t.DisplayName,
@@ -4430,12 +4438,8 @@ func (t *Task) ComputePredictedCostForWeek(ctx context.Context) (CostPredictionR
 		return CostPredictionResult{}, nil
 	}
 
-	result := results[0]
 	return CostPredictionResult{
-		PredictedCost: cost.Cost{
-			OnDemandEC2Cost: result.AvgOnDemandCost,
-			AdjustedEC2Cost: result.AvgAdjustedCost,
-		},
+		PredictedCost: results[0].toCost(),
 	}, nil
 }
 

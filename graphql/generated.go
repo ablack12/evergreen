@@ -54,6 +54,7 @@ type ResolverRoot interface {
 	AdminSettings() AdminSettingsResolver
 	Annotation() AnnotationResolver
 	ContainerPool() ContainerPoolResolver
+	Cost() CostResolver
 	Distro() DistroResolver
 	Host() HostResolver
 	Image() ImageResolver
@@ -412,7 +413,9 @@ type ComplexityRoot struct {
 		AdjustedS3ArtifactStorageCost func(childComplexity int) int
 		AdjustedS3LogPutCost          func(childComplexity int) int
 		AdjustedS3LogStorageCost      func(childComplexity int) int
+		ChildPatchesTotalCost         func(childComplexity int) int
 		OnDemandEC2Cost               func(childComplexity int) int
+		Total                         func(childComplexity int) int
 	}
 
 	CostConfig struct {
@@ -1210,6 +1213,7 @@ type ComplexityRoot struct {
 		Builds                func(childComplexity int) int
 		ChildPatchAliases     func(childComplexity int) int
 		ChildPatches          func(childComplexity int) int
+		Cost                  func(childComplexity int) int
 		CreateTime            func(childComplexity int) int
 		Description           func(childComplexity int) int
 		Duration              func(childComplexity int) int
@@ -1219,11 +1223,13 @@ type ComplexityRoot struct {
 		Hidden                func(childComplexity int) int
 		Id                    func(childComplexity int) int
 		IncludedLocalModules  func(childComplexity int) int
+		IngestTime            func(childComplexity int) int
 		InvalidatedByUpstream func(childComplexity int) int
 		ModuleCodeChanges     func(childComplexity int) int
 		Parameters            func(childComplexity int) int
 		PatchNumber           func(childComplexity int) int
 		PatchTriggerAliases   func(childComplexity int) int
+		PredictedCost         func(childComplexity int) int
 		Project               func(childComplexity int) int
 		ProjectId             func(childComplexity int) int
 		ProjectIdentifier     func(childComplexity int) int
@@ -1679,10 +1685,12 @@ type ComplexityRoot struct {
 	}
 
 	S3StorageCostConfig struct {
-		ArchiveStorageCostDiscount       func(childComplexity int) int
-		DefaultMaxArtifactExpirationDays func(childComplexity int) int
-		IAStorageCostDiscount            func(childComplexity int) int
-		StandardStorageCostDiscount      func(childComplexity int) int
+		ArchiveStorageCostDiscount               func(childComplexity int) int
+		ArtifactAwsAccountsWithoutLifecycleRules func(childComplexity int) int
+		DefaultMaxArtifactExpirationDays         func(childComplexity int) int
+		DevprodOwnedAWSAccountIds                func(childComplexity int) int
+		IAStorageCostDiscount                    func(childComplexity int) int
+		StandardStorageCostDiscount              func(childComplexity int) int
 	}
 
 	S3UploadCostConfig struct {
@@ -2306,6 +2314,7 @@ type ComplexityRoot struct {
 		GitTags                  func(childComplexity int) int
 		Id                       func(childComplexity int) int
 		Ignored                  func(childComplexity int) int
+		IngestTime               func(childComplexity int) int
 		IsPatch                  func(childComplexity int) int
 		Manifest                 func(childComplexity int) int
 		Message                  func(childComplexity int) int
@@ -2342,6 +2351,7 @@ type ComplexityRoot struct {
 		FinishTime          func(childComplexity int) int
 		Id                  func(childComplexity int) int
 		Ignored             func(childComplexity int) int
+		IngestTime          func(childComplexity int) int
 		Message             func(childComplexity int) int
 		Project             func(childComplexity int) int
 		Repo                func(childComplexity int) int
@@ -2452,6 +2462,9 @@ type AnnotationResolver interface {
 }
 type ContainerPoolResolver interface {
 	Port(ctx context.Context, obj *model.APIContainerPool) (int, error)
+}
+type CostResolver interface {
+	Total(ctx context.Context, obj *cost.Cost) (*float64, error)
 }
 type DistroResolver interface {
 	AvailableRegions(ctx context.Context, obj *model.APIDistro) ([]string, error)
@@ -4152,12 +4165,24 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Cost.AdjustedS3LogStorageCost(childComplexity), true
+	case "Cost.childPatchesTotalCost":
+		if e.complexity.Cost.ChildPatchesTotalCost == nil {
+			break
+		}
+
+		return e.complexity.Cost.ChildPatchesTotalCost(childComplexity), true
 	case "Cost.onDemandEC2Cost":
 		if e.complexity.Cost.OnDemandEC2Cost == nil {
 			break
 		}
 
 		return e.complexity.Cost.OnDemandEC2Cost(childComplexity), true
+	case "Cost.total":
+		if e.complexity.Cost.Total == nil {
+			break
+		}
+
+		return e.complexity.Cost.Total(childComplexity), true
 
 	case "CostConfig.ebsCost":
 		if e.complexity.CostConfig.EBSCost == nil {
@@ -7527,6 +7552,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Patch.ChildPatches(childComplexity), true
+	case "Patch.cost":
+		if e.complexity.Patch.Cost == nil {
+			break
+		}
+
+		return e.complexity.Patch.Cost(childComplexity), true
 	case "Patch.createTime":
 		if e.complexity.Patch.CreateTime == nil {
 			break
@@ -7581,6 +7612,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Patch.IncludedLocalModules(childComplexity), true
+	case "Patch.ingestTime":
+		if e.complexity.Patch.IngestTime == nil {
+			break
+		}
+
+		return e.complexity.Patch.IngestTime(childComplexity), true
 	case "Patch.invalidatedByUpstream":
 		if e.complexity.Patch.InvalidatedByUpstream == nil {
 			break
@@ -7611,6 +7648,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Patch.PatchTriggerAliases(childComplexity), true
+	case "Patch.predictedCost":
+		if e.complexity.Patch.PredictedCost == nil {
+			break
+		}
+
+		return e.complexity.Patch.PredictedCost(childComplexity), true
 	case "Patch.project":
 		if e.complexity.Patch.Project == nil {
 			break
@@ -9813,12 +9856,24 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.S3StorageCostConfig.ArchiveStorageCostDiscount(childComplexity), true
+	case "S3StorageCostConfig.artifactAwsAccountsWithoutLifecycleRules":
+		if e.complexity.S3StorageCostConfig.ArtifactAwsAccountsWithoutLifecycleRules == nil {
+			break
+		}
+
+		return e.complexity.S3StorageCostConfig.ArtifactAwsAccountsWithoutLifecycleRules(childComplexity), true
 	case "S3StorageCostConfig.defaultMaxArtifactExpirationDays":
 		if e.complexity.S3StorageCostConfig.DefaultMaxArtifactExpirationDays == nil {
 			break
 		}
 
 		return e.complexity.S3StorageCostConfig.DefaultMaxArtifactExpirationDays(childComplexity), true
+	case "S3StorageCostConfig.devprodOwnedAwsAccountIds":
+		if e.complexity.S3StorageCostConfig.DevprodOwnedAWSAccountIds == nil {
+			break
+		}
+
+		return e.complexity.S3StorageCostConfig.DevprodOwnedAWSAccountIds(childComplexity), true
 	case "S3StorageCostConfig.iAStorageCostDiscount":
 		if e.complexity.S3StorageCostConfig.IAStorageCostDiscount == nil {
 			break
@@ -12416,6 +12471,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Version.Ignored(childComplexity), true
+	case "Version.ingestTime":
+		if e.complexity.Version.IngestTime == nil {
+			break
+		}
+
+		return e.complexity.Version.IngestTime(childComplexity), true
 	case "Version.isPatch":
 		if e.complexity.Version.IsPatch == nil {
 			break
@@ -12630,6 +12691,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.VersionLite.Ignored(childComplexity), true
+	case "VersionLite.ingestTime":
+		if e.complexity.VersionLite.IngestTime == nil {
+			break
+		}
+
+		return e.complexity.VersionLite.IngestTime(childComplexity), true
 	case "VersionLite.message":
 		if e.complexity.VersionLite.Message == nil {
 			break
@@ -24010,6 +24077,64 @@ func (ec *executionContext) fieldContext_ContainerPoolsConfig_pools(_ context.Co
 				return ec.fieldContext_ContainerPool_port(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type ContainerPool", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Cost_total(ctx context.Context, field graphql.CollectedField, obj *cost.Cost) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Cost_total,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Cost().Total(ctx, obj)
+		},
+		nil,
+		ec.marshalOFloat2ᚖfloat64,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Cost_total(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Cost",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Float does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Cost_childPatchesTotalCost(ctx context.Context, field graphql.CollectedField, obj *cost.Cost) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Cost_childPatchesTotalCost,
+		func(ctx context.Context) (any, error) {
+			return obj.ChildPatchesTotalCost, nil
+		},
+		nil,
+		ec.marshalOFloat2float64,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Cost_childPatchesTotalCost(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Cost",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Float does not have child fields")
 		},
 	}
 	return fc, nil
@@ -35608,6 +35733,8 @@ func (ec *executionContext) fieldContext_MainlineCommitVersion_rolledUpVersions(
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -35723,6 +35850,8 @@ func (ec *executionContext) fieldContext_MainlineCommitVersion_version(_ context
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -37247,6 +37376,8 @@ func (ec *executionContext) fieldContext_Mutation_setPatchVisibility(ctx context
 				return ec.fieldContext_Patch_childPatches(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Patch_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Patch_ingestTime(ctx, field)
 			case "description":
 				return ec.fieldContext_Patch_description(ctx, field)
 			case "duration":
@@ -37297,6 +37428,10 @@ func (ec *executionContext) fieldContext_Mutation_setPatchVisibility(ctx context
 				return ec.fieldContext_Patch_version(ctx, field)
 			case "versionFull":
 				return ec.fieldContext_Patch_versionFull(ctx, field)
+			case "cost":
+				return ec.fieldContext_Patch_cost(ctx, field)
+			case "predictedCost":
+				return ec.fieldContext_Patch_predictedCost(ctx, field)
 			case "invalidatedByUpstream":
 				return ec.fieldContext_Patch_invalidatedByUpstream(ctx, field)
 			}
@@ -37360,6 +37495,8 @@ func (ec *executionContext) fieldContext_Mutation_schedulePatch(ctx context.Cont
 				return ec.fieldContext_Patch_childPatches(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Patch_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Patch_ingestTime(ctx, field)
 			case "description":
 				return ec.fieldContext_Patch_description(ctx, field)
 			case "duration":
@@ -37410,6 +37547,10 @@ func (ec *executionContext) fieldContext_Mutation_schedulePatch(ctx context.Cont
 				return ec.fieldContext_Patch_version(ctx, field)
 			case "versionFull":
 				return ec.fieldContext_Patch_versionFull(ctx, field)
+			case "cost":
+				return ec.fieldContext_Patch_cost(ctx, field)
+			case "predictedCost":
+				return ec.fieldContext_Patch_predictedCost(ctx, field)
 			case "invalidatedByUpstream":
 				return ec.fieldContext_Patch_invalidatedByUpstream(ctx, field)
 			}
@@ -41627,6 +41768,8 @@ func (ec *executionContext) fieldContext_Mutation_restartVersions(ctx context.Co
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -43993,6 +44136,8 @@ func (ec *executionContext) fieldContext_Patch_childPatches(_ context.Context, f
 				return ec.fieldContext_Patch_childPatches(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Patch_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Patch_ingestTime(ctx, field)
 			case "description":
 				return ec.fieldContext_Patch_description(ctx, field)
 			case "duration":
@@ -44043,6 +44188,10 @@ func (ec *executionContext) fieldContext_Patch_childPatches(_ context.Context, f
 				return ec.fieldContext_Patch_version(ctx, field)
 			case "versionFull":
 				return ec.fieldContext_Patch_versionFull(ctx, field)
+			case "cost":
+				return ec.fieldContext_Patch_cost(ctx, field)
+			case "predictedCost":
+				return ec.fieldContext_Patch_predictedCost(ctx, field)
 			case "invalidatedByUpstream":
 				return ec.fieldContext_Patch_invalidatedByUpstream(ctx, field)
 			}
@@ -44069,6 +44218,35 @@ func (ec *executionContext) _Patch_createTime(ctx context.Context, field graphql
 }
 
 func (ec *executionContext) fieldContext_Patch_createTime(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Patch",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Patch_ingestTime(ctx context.Context, field graphql.CollectedField, obj *model.APIPatch) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Patch_ingestTime,
+		func(ctx context.Context) (any, error) {
+			return obj.IngestTime, nil
+		},
+		nil,
+		ec.marshalOTime2ᚖtimeᚐTime,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Patch_ingestTime(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Patch",
 		Field:      field,
@@ -45010,6 +45188,8 @@ func (ec *executionContext) fieldContext_Patch_version(_ context.Context, field 
 				return ec.fieldContext_VersionLite_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_VersionLite_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_VersionLite_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_VersionLite_errors(ctx, field)
 			case "finishTime":
@@ -45091,6 +45271,8 @@ func (ec *executionContext) fieldContext_Patch_versionFull(_ context.Context, fi
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -45155,6 +45337,108 @@ func (ec *executionContext) fieldContext_Patch_versionFull(_ context.Context, fi
 				return ec.fieldContext_Version_waterfallBuilds(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Version", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Patch_cost(ctx context.Context, field graphql.CollectedField, obj *model.APIPatch) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Patch_cost,
+		func(ctx context.Context) (any, error) {
+			return obj.Cost, nil
+		},
+		nil,
+		ec.marshalOCost2ᚖgithubᚗcomᚋevergreenᚑciᚋevergreenᚋmodelᚋcostᚐCost,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Patch_cost(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Patch",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "total":
+				return ec.fieldContext_Cost_total(ctx, field)
+			case "childPatchesTotalCost":
+				return ec.fieldContext_Cost_childPatchesTotalCost(ctx, field)
+			case "onDemandEC2Cost":
+				return ec.fieldContext_Cost_onDemandEC2Cost(ctx, field)
+			case "adjustedEC2Cost":
+				return ec.fieldContext_Cost_adjustedEC2Cost(ctx, field)
+			case "adjustedEBSStorageCost":
+				return ec.fieldContext_Cost_adjustedEBSStorageCost(ctx, field)
+			case "adjustedEBSThroughputCost":
+				return ec.fieldContext_Cost_adjustedEBSThroughputCost(ctx, field)
+			case "adjustedS3ArtifactPutCost":
+				return ec.fieldContext_Cost_adjustedS3ArtifactPutCost(ctx, field)
+			case "adjustedS3ArtifactStorageCost":
+				return ec.fieldContext_Cost_adjustedS3ArtifactStorageCost(ctx, field)
+			case "adjustedS3LogPutCost":
+				return ec.fieldContext_Cost_adjustedS3LogPutCost(ctx, field)
+			case "adjustedS3LogStorageCost":
+				return ec.fieldContext_Cost_adjustedS3LogStorageCost(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Cost", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Patch_predictedCost(ctx context.Context, field graphql.CollectedField, obj *model.APIPatch) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Patch_predictedCost,
+		func(ctx context.Context) (any, error) {
+			return obj.PredictedCost, nil
+		},
+		nil,
+		ec.marshalOCost2ᚖgithubᚗcomᚋevergreenᚑciᚋevergreenᚋmodelᚋcostᚐCost,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Patch_predictedCost(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Patch",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "total":
+				return ec.fieldContext_Cost_total(ctx, field)
+			case "childPatchesTotalCost":
+				return ec.fieldContext_Cost_childPatchesTotalCost(ctx, field)
+			case "onDemandEC2Cost":
+				return ec.fieldContext_Cost_onDemandEC2Cost(ctx, field)
+			case "adjustedEC2Cost":
+				return ec.fieldContext_Cost_adjustedEC2Cost(ctx, field)
+			case "adjustedEBSStorageCost":
+				return ec.fieldContext_Cost_adjustedEBSStorageCost(ctx, field)
+			case "adjustedEBSThroughputCost":
+				return ec.fieldContext_Cost_adjustedEBSThroughputCost(ctx, field)
+			case "adjustedS3ArtifactPutCost":
+				return ec.fieldContext_Cost_adjustedS3ArtifactPutCost(ctx, field)
+			case "adjustedS3ArtifactStorageCost":
+				return ec.fieldContext_Cost_adjustedS3ArtifactStorageCost(ctx, field)
+			case "adjustedS3LogPutCost":
+				return ec.fieldContext_Cost_adjustedS3LogPutCost(ctx, field)
+			case "adjustedS3LogStorageCost":
+				return ec.fieldContext_Cost_adjustedS3LogStorageCost(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Cost", field.Name)
 		},
 	}
 	return fc, nil
@@ -45725,6 +46009,8 @@ func (ec *executionContext) fieldContext_Patches_patches(_ context.Context, fiel
 				return ec.fieldContext_Patch_childPatches(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Patch_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Patch_ingestTime(ctx, field)
 			case "description":
 				return ec.fieldContext_Patch_description(ctx, field)
 			case "duration":
@@ -45775,6 +46061,10 @@ func (ec *executionContext) fieldContext_Patches_patches(_ context.Context, fiel
 				return ec.fieldContext_Patch_version(ctx, field)
 			case "versionFull":
 				return ec.fieldContext_Patch_versionFull(ctx, field)
+			case "cost":
+				return ec.fieldContext_Patch_cost(ctx, field)
+			case "predictedCost":
+				return ec.fieldContext_Patch_predictedCost(ctx, field)
 			case "invalidatedByUpstream":
 				return ec.fieldContext_Patch_invalidatedByUpstream(ctx, field)
 			}
@@ -52427,6 +52717,8 @@ func (ec *executionContext) fieldContext_Query_patch(ctx context.Context, field 
 				return ec.fieldContext_Patch_childPatches(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Patch_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Patch_ingestTime(ctx, field)
 			case "description":
 				return ec.fieldContext_Patch_description(ctx, field)
 			case "duration":
@@ -52477,6 +52769,10 @@ func (ec *executionContext) fieldContext_Query_patch(ctx context.Context, field 
 				return ec.fieldContext_Patch_version(ctx, field)
 			case "versionFull":
 				return ec.fieldContext_Patch_versionFull(ctx, field)
+			case "cost":
+				return ec.fieldContext_Patch_cost(ctx, field)
+			case "predictedCost":
+				return ec.fieldContext_Patch_predictedCost(ctx, field)
 			case "invalidatedByUpstream":
 				return ec.fieldContext_Patch_invalidatedByUpstream(ctx, field)
 			}
@@ -54215,6 +54511,8 @@ func (ec *executionContext) fieldContext_Query_version(ctx context.Context, fiel
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -57120,6 +57418,10 @@ func (ec *executionContext) fieldContext_S3CostConfig_storage(_ context.Context,
 				return ec.fieldContext_S3StorageCostConfig_archiveStorageCostDiscount(ctx, field)
 			case "defaultMaxArtifactExpirationDays":
 				return ec.fieldContext_S3StorageCostConfig_defaultMaxArtifactExpirationDays(ctx, field)
+			case "devprodOwnedAwsAccountIds":
+				return ec.fieldContext_S3StorageCostConfig_devprodOwnedAwsAccountIds(ctx, field)
+			case "artifactAwsAccountsWithoutLifecycleRules":
+				return ec.fieldContext_S3StorageCostConfig_artifactAwsAccountsWithoutLifecycleRules(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type S3StorageCostConfig", field.Name)
 		},
@@ -57338,6 +57640,64 @@ func (ec *executionContext) fieldContext_S3StorageCostConfig_defaultMaxArtifactE
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _S3StorageCostConfig_devprodOwnedAwsAccountIds(ctx context.Context, field graphql.CollectedField, obj *model.APIS3StorageCostConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_S3StorageCostConfig_devprodOwnedAwsAccountIds,
+		func(ctx context.Context) (any, error) {
+			return obj.DevprodOwnedAWSAccountIds, nil
+		},
+		nil,
+		ec.marshalOString2ᚕstringᚄ,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_S3StorageCostConfig_devprodOwnedAwsAccountIds(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "S3StorageCostConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _S3StorageCostConfig_artifactAwsAccountsWithoutLifecycleRules(ctx context.Context, field graphql.CollectedField, obj *model.APIS3StorageCostConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_S3StorageCostConfig_artifactAwsAccountsWithoutLifecycleRules,
+		func(ctx context.Context) (any, error) {
+			return obj.ArtifactAwsAccountsWithoutLifecycleRules, nil
+		},
+		nil,
+		ec.marshalOString2ᚕstringᚄ,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_S3StorageCostConfig_artifactAwsAccountsWithoutLifecycleRules(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "S3StorageCostConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
 		},
 	}
 	return fc, nil
@@ -63864,6 +64224,8 @@ func (ec *executionContext) fieldContext_Task_patch(_ context.Context, field gra
 				return ec.fieldContext_Patch_childPatches(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Patch_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Patch_ingestTime(ctx, field)
 			case "description":
 				return ec.fieldContext_Patch_description(ctx, field)
 			case "duration":
@@ -63914,6 +64276,10 @@ func (ec *executionContext) fieldContext_Task_patch(_ context.Context, field gra
 				return ec.fieldContext_Patch_version(ctx, field)
 			case "versionFull":
 				return ec.fieldContext_Patch_versionFull(ctx, field)
+			case "cost":
+				return ec.fieldContext_Patch_cost(ctx, field)
+			case "predictedCost":
+				return ec.fieldContext_Patch_predictedCost(ctx, field)
 			case "invalidatedByUpstream":
 				return ec.fieldContext_Patch_invalidatedByUpstream(ctx, field)
 			}
@@ -65418,6 +65784,10 @@ func (ec *executionContext) fieldContext_Task_taskCost(_ context.Context, field 
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
+			case "total":
+				return ec.fieldContext_Cost_total(ctx, field)
+			case "childPatchesTotalCost":
+				return ec.fieldContext_Cost_childPatchesTotalCost(ctx, field)
 			case "onDemandEC2Cost":
 				return ec.fieldContext_Cost_onDemandEC2Cost(ctx, field)
 			case "adjustedEC2Cost":
@@ -65465,6 +65835,10 @@ func (ec *executionContext) fieldContext_Task_predictedTaskCost(_ context.Contex
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
+			case "total":
+				return ec.fieldContext_Cost_total(ctx, field)
+			case "childPatchesTotalCost":
+				return ec.fieldContext_Cost_childPatchesTotalCost(ctx, field)
 			case "onDemandEC2Cost":
 				return ec.fieldContext_Cost_onDemandEC2Cost(ctx, field)
 			case "adjustedEC2Cost":
@@ -65697,6 +66071,8 @@ func (ec *executionContext) fieldContext_Task_version(_ context.Context, field g
 				return ec.fieldContext_VersionLite_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_VersionLite_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_VersionLite_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_VersionLite_errors(ctx, field)
 			case "finishTime":
@@ -65778,6 +66154,8 @@ func (ec *executionContext) fieldContext_Task_versionMetadata(_ context.Context,
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -71439,6 +71817,8 @@ func (ec *executionContext) fieldContext_UpstreamProject_version(_ context.Conte
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -72867,6 +73247,8 @@ func (ec *executionContext) fieldContext_Version_baseVersion(_ context.Context, 
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -73109,6 +73491,8 @@ func (ec *executionContext) fieldContext_Version_childVersions(_ context.Context
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -73202,6 +73586,10 @@ func (ec *executionContext) fieldContext_Version_cost(_ context.Context, field g
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
+			case "total":
+				return ec.fieldContext_Cost_total(ctx, field)
+			case "childPatchesTotalCost":
+				return ec.fieldContext_Cost_childPatchesTotalCost(ctx, field)
 			case "onDemandEC2Cost":
 				return ec.fieldContext_Cost_onDemandEC2Cost(ctx, field)
 			case "adjustedEC2Cost":
@@ -73242,6 +73630,35 @@ func (ec *executionContext) _Version_createTime(ctx context.Context, field graph
 }
 
 func (ec *executionContext) fieldContext_Version_createTime(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Version",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Version_ingestTime(ctx context.Context, field graphql.CollectedField, obj *model.APIVersion) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Version_ingestTime,
+		func(ctx context.Context) (any, error) {
+			return obj.IngestTime, nil
+		},
+		nil,
+		ec.marshalOTime2ᚖtimeᚐTime,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Version_ingestTime(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Version",
 		Field:      field,
@@ -73659,6 +74076,8 @@ func (ec *executionContext) fieldContext_Version_patch(_ context.Context, field 
 				return ec.fieldContext_Patch_childPatches(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Patch_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Patch_ingestTime(ctx, field)
 			case "description":
 				return ec.fieldContext_Patch_description(ctx, field)
 			case "duration":
@@ -73709,6 +74128,10 @@ func (ec *executionContext) fieldContext_Version_patch(_ context.Context, field 
 				return ec.fieldContext_Patch_version(ctx, field)
 			case "versionFull":
 				return ec.fieldContext_Patch_versionFull(ctx, field)
+			case "cost":
+				return ec.fieldContext_Patch_cost(ctx, field)
+			case "predictedCost":
+				return ec.fieldContext_Patch_predictedCost(ctx, field)
 			case "invalidatedByUpstream":
 				return ec.fieldContext_Patch_invalidatedByUpstream(ctx, field)
 			}
@@ -73742,6 +74165,10 @@ func (ec *executionContext) fieldContext_Version_predictedCost(_ context.Context
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
+			case "total":
+				return ec.fieldContext_Cost_total(ctx, field)
+			case "childPatchesTotalCost":
+				return ec.fieldContext_Cost_childPatchesTotalCost(ctx, field)
 			case "onDemandEC2Cost":
 				return ec.fieldContext_Cost_onDemandEC2Cost(ctx, field)
 			case "adjustedEC2Cost":
@@ -73811,6 +74238,8 @@ func (ec *executionContext) fieldContext_Version_previousVersion(_ context.Conte
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -74706,6 +75135,10 @@ func (ec *executionContext) fieldContext_VersionLite_cost(_ context.Context, fie
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
+			case "total":
+				return ec.fieldContext_Cost_total(ctx, field)
+			case "childPatchesTotalCost":
+				return ec.fieldContext_Cost_childPatchesTotalCost(ctx, field)
 			case "onDemandEC2Cost":
 				return ec.fieldContext_Cost_onDemandEC2Cost(ctx, field)
 			case "adjustedEC2Cost":
@@ -74746,6 +75179,35 @@ func (ec *executionContext) _VersionLite_createTime(ctx context.Context, field g
 }
 
 func (ec *executionContext) fieldContext_VersionLite_createTime(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "VersionLite",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _VersionLite_ingestTime(ctx context.Context, field graphql.CollectedField, obj *model1.Version) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_VersionLite_ingestTime,
+		func(ctx context.Context) (any, error) {
+			return obj.IngestTime, nil
+		},
+		nil,
+		ec.marshalOTime2timeᚐTime,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_VersionLite_ingestTime(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "VersionLite",
 		Field:      field,
@@ -76064,6 +76526,8 @@ func (ec *executionContext) fieldContext_Waterfall_flattenedVersions(_ context.C
 				return ec.fieldContext_Version_cost(ctx, field)
 			case "createTime":
 				return ec.fieldContext_Version_createTime(ctx, field)
+			case "ingestTime":
+				return ec.fieldContext_Version_ingestTime(ctx, field)
 			case "errors":
 				return ec.fieldContext_Version_errors(ctx, field)
 			case "externalLinksForMetadata":
@@ -86371,7 +86835,7 @@ func (ec *executionContext) unmarshalInputS3StorageCostConfigInput(ctx context.C
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"standardStorageCostDiscount", "iAStorageCostDiscount", "archiveStorageCostDiscount", "defaultMaxArtifactExpirationDays"}
+	fieldsInOrder := [...]string{"standardStorageCostDiscount", "iAStorageCostDiscount", "archiveStorageCostDiscount", "defaultMaxArtifactExpirationDays", "devprodOwnedAwsAccountIds", "artifactAwsAccountsWithoutLifecycleRules"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -86406,6 +86870,20 @@ func (ec *executionContext) unmarshalInputS3StorageCostConfigInput(ctx context.C
 				return it, err
 			}
 			it.DefaultMaxArtifactExpirationDays = data
+		case "devprodOwnedAwsAccountIds":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("devprodOwnedAwsAccountIds"))
+			data, err := ec.unmarshalOString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.DevprodOwnedAWSAccountIds = data
+		case "artifactAwsAccountsWithoutLifecycleRules":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("artifactAwsAccountsWithoutLifecycleRules"))
+			data, err := ec.unmarshalOString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ArtifactAwsAccountsWithoutLifecycleRules = data
 		}
 	}
 
@@ -91405,6 +91883,41 @@ func (ec *executionContext) _Cost(ctx context.Context, sel ast.SelectionSet, obj
 		switch field.Name {
 		case "__typename":
 			out.Values[i] = graphql.MarshalString("Cost")
+		case "total":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Cost_total(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "childPatchesTotalCost":
+			out.Values[i] = ec._Cost_childPatchesTotalCost(ctx, field, obj)
 		case "onDemandEC2Cost":
 			out.Values[i] = ec._Cost_onDemandEC2Cost(ctx, field, obj)
 		case "adjustedEC2Cost":
@@ -97763,6 +98276,8 @@ func (ec *executionContext) _Patch(ctx context.Context, sel ast.SelectionSet, ob
 			out.Values[i] = ec._Patch_childPatches(ctx, field, obj)
 		case "createTime":
 			out.Values[i] = ec._Patch_createTime(ctx, field, obj)
+		case "ingestTime":
+			out.Values[i] = ec._Patch_ingestTime(ctx, field, obj)
 		case "description":
 			out.Values[i] = ec._Patch_description(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -98298,6 +98813,10 @@ func (ec *executionContext) _Patch(ctx context.Context, sel ast.SelectionSet, ob
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "cost":
+			out.Values[i] = ec._Patch_cost(ctx, field, obj)
+		case "predictedCost":
+			out.Values[i] = ec._Patch_predictedCost(ctx, field, obj)
 		case "invalidatedByUpstream":
 			out.Values[i] = ec._Patch_invalidatedByUpstream(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -102452,6 +102971,10 @@ func (ec *executionContext) _S3StorageCostConfig(ctx context.Context, sel ast.Se
 			out.Values[i] = ec._S3StorageCostConfig_archiveStorageCostDiscount(ctx, field, obj)
 		case "defaultMaxArtifactExpirationDays":
 			out.Values[i] = ec._S3StorageCostConfig_defaultMaxArtifactExpirationDays(ctx, field, obj)
+		case "devprodOwnedAwsAccountIds":
+			out.Values[i] = ec._S3StorageCostConfig_devprodOwnedAwsAccountIds(ctx, field, obj)
+		case "artifactAwsAccountsWithoutLifecycleRules":
+			out.Values[i] = ec._S3StorageCostConfig_artifactAwsAccountsWithoutLifecycleRules(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -108225,6 +108748,8 @@ func (ec *executionContext) _Version(ctx context.Context, sel ast.SelectionSet, 
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "ingestTime":
+			out.Values[i] = ec._Version_ingestTime(ctx, field, obj)
 		case "errors":
 			out.Values[i] = ec._Version_errors(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -108921,6 +109446,8 @@ func (ec *executionContext) _VersionLite(ctx context.Context, sel ast.SelectionS
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "ingestTime":
+			out.Values[i] = ec._VersionLite_ingestTime(ctx, field, obj)
 		case "errors":
 			out.Values[i] = ec._VersionLite_errors(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
