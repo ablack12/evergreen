@@ -2076,7 +2076,7 @@ type APIServiceFlags struct {
 	EmailNotificationsDisabled   bool `json:"email_notifications_disabled"`
 	WebhookNotificationsDisabled bool `json:"webhook_notifications_disabled"`
 	GithubStatusAPIDisabled      bool `json:"github_status_api_disabled"`
-	SlackSenderCheckEnabled     bool `json:"slack_sender_check_enabled"`
+	SlackSenderCheckEnabled      bool `json:"slack_sender_check_enabled"`
 }
 
 type APIProjectTasksPair struct {
@@ -2570,7 +2570,7 @@ func (as *APIServiceFlags) ToService() (any, error) {
 		UseMergeQueuePathFilteringDisabled: as.UseMergeQueuePathFilteringDisabled,
 		PSLoggingDisabled:                  as.PSLoggingDisabled,
 		PodDiagnosticsDisabled:             as.PodDiagnosticsDisabled,
-		SlackSenderCheckEnabled:           as.SlackSenderCheckEnabled,
+		SlackSenderCheckEnabled:            as.SlackSenderCheckEnabled,
 	}, nil
 }
 

@@ -49,6 +49,8 @@ make lint-<package>  # Lint a specific package.
 make lint-evergreen  # Lint the top-level evergreen package (special case).
 ```
 
+After making changes, always run `goimports -w <file>` on every modified `.go` file, then run `make lint-<package>` for each affected package and verify there are no new errors beyond any pre-existing golangci-lint toolchain crashes.
+
 ### CI Self-Tests
 
 The Evergreen codebase has automated tests defined in `self-tests.yml`, which itself runs in Evergreen. For most tasks in
