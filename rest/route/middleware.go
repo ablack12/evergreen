@@ -540,6 +540,20 @@ func (m *sendNotificationMiddleware) ServeHTTP(rw http.ResponseWriter, r *http.R
 		return
 	}
 
+	senderCheckEnabled := evergreen.GetEnvironment().Settings().ServiceFlags.SlackSenderCheckEnabled
+	grip.Debug(ctx, message.Fields{
+		"message":              "slack notification target does not match sender",
+		"sender":               u.Username(),
+		"target":               target,
+		"slack_username":       slackUsername,
+		"sender_check_enabled": senderCheckEnabled,
+	})
+
+	if !senderCheckEnabled {
+		next(rw, r)
+		return
+	}
+
 	gimlet.WriteResponse(ctx, rw, gimlet.MakeJSONErrorResponder(gimlet.ErrorResponse{
 		StatusCode: http.StatusUnauthorized,
 		Message:    "not authorized",
