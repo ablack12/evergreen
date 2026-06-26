@@ -112,8 +112,11 @@ var (
 )
 
 // NewGithubIntent creates an Intent from a google/go-github PullRequestEvent,
-// or returns an error if the some part of the struct is invalid
-func NewGithubIntent(ctx context.Context, msgDeliveryID, patchOwner, calledBy, alias, mergeBase string, pr *github.PullRequest) (Intent, error) {
+// or returns an error if the some part of the struct is invalid. The botAssignee
+// parameter should be the PR assignee read directly from the event when the PR
+// author is a bot, since the event payload is the authoritative source for this
+// field (the GitHub REST API does not reliably populate it).
+func NewGithubIntent(ctx context.Context, msgDeliveryID, patchOwner, calledBy, alias, mergeBase string, pr *github.PullRequest, botAssignee *github.User) (Intent, error) {
 	if pr == nil ||
 		pr.Base == nil || pr.Base.Repo == nil ||
 		pr.Head == nil || pr.Head.Repo == nil ||
@@ -156,8 +159,8 @@ func NewGithubIntent(ctx context.Context, msgDeliveryID, patchOwner, calledBy, a
 	// mongodb-sage-bot sets the PR assignee as the intended human author, so
 	// use the assignee's identity for attribution instead.
 	ownerUID := int(pr.User.GetID())
-	assigneeLogin := pr.GetAssignee().GetLogin()
-	assigneeUID := int(pr.GetAssignee().GetID())
+	assigneeLogin := botAssignee.GetLogin()
+	assigneeUID := int(botAssignee.GetID())
 	if patchOwner == evergreen.GitHubSageBotLogin && assigneeLogin != "" && assigneeUID != 0 {
 		patchOwner = assigneeLogin
 		ownerUID = assigneeUID

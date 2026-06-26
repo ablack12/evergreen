@@ -257,7 +257,7 @@ func (gh *githubHookApi) Run(ctx context.Context) gimlet.Responder {
 				break
 			}
 
-			if err := gh.AddIntentForPR(ctx, event.PullRequest, event.Sender.GetLogin(), patch.AutomatedCaller, "", false); err != nil {
+			if err := gh.AddIntentForPR(ctx, event.PullRequest, event.Sender.GetLogin(), patch.AutomatedCaller, "", false, event.GetPullRequest().GetAssignee()); err != nil {
 				grip.Error(ctx, message.WrapError(err, message.Fields{
 					"source":    "GitHub hook",
 					"msg_id":    gh.msgID,
@@ -986,7 +986,11 @@ func (gh *githubHookApi) createPRPatch(ctx context.Context, owner, repo, calledB
 		return gh.sc.AddCommentToPR(ctx, owner, repo, prNumber, graphiteRebaseComment)
 	}
 
-	return gh.AddIntentForPR(ctx, pr, pr.User.GetLogin(), calledBy, alias, true)
+	var botAssignee *github.User
+	if len(pr.Assignees) > 0 {
+		botAssignee = pr.Assignees[0]
+	}
+	return gh.AddIntentForPR(ctx, pr, pr.User.GetLogin(), calledBy, alias, true, botAssignee)
 }
 
 // keepPRPatchDefinition looks for the most recent patch created for the pr number and updates the
@@ -1038,7 +1042,7 @@ func (gh *githubHookApi) refreshPatchStatus(ctx context.Context, owner, repo str
 // before creating a new one. For example, if multiple patches with the same head sha exist, the PR(s) will get
 // both updates from patches and be in a race condition for which one GitHub checks shows last- so we want
 // to avoid this state when possible.
-func (gh *githubHookApi) AddIntentForPR(ctx context.Context, pr *github.PullRequest, owner, calledBy, alias string, overrideExisting bool) error {
+func (gh *githubHookApi) AddIntentForPR(ctx context.Context, pr *github.PullRequest, owner, calledBy, alias string, overrideExisting bool, botAssignee *github.User) error {
 	// Verify that the owner/repo uses PR testing before inserting the intent.
 	baseRepoName := pr.Base.Repo.GetFullName()
 	baseOwnerRepo := strings.Split(baseRepoName, "/")
@@ -1108,7 +1112,7 @@ func (gh *githubHookApi) AddIntentForPR(ctx context.Context, pr *github.PullRequ
 		return errors.Wrapf(err, "getting merge base between branches '%s' and '%s'", pr.Base.GetLabel(), pr.Head.GetLabel())
 	}
 
-	ghi, err := patch.NewGithubIntent(ctx, gh.msgID, owner, calledBy, alias, mergeBase, pr)
+	ghi, err := patch.NewGithubIntent(ctx, gh.msgID, owner, calledBy, alias, mergeBase, pr, botAssignee)
 	if err != nil {
 		return errors.Wrap(err, "creating GitHub patch intent")
 	}

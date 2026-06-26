@@ -50,45 +50,45 @@ func (s *GithubSuite) SetupTest() {
 }
 
 func (s *GithubSuite) TestNewGithubIntent() {
-	intent, err := NewGithubIntent(s.T().Context(), "1", "", "", "", "", testutil.NewGithubPR(0, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title))
+	intent, err := NewGithubIntent(s.T().Context(), "1", "", "", "", "", testutil.NewGithubPR(0, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title), nil)
 	s.Nil(intent)
 	s.Error(err)
 
-	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, "", s.baseHash, s.headRepo, s.hash, s.user, s.title))
+	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, "", s.baseHash, s.headRepo, s.hash, s.user, s.title), nil)
 	s.Nil(intent)
 	s.Error(err)
 
-	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, "", s.hash, s.user, s.title))
+	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, "", s.hash, s.user, s.title), nil)
 	s.Nil(intent)
 	s.Error(err)
 
-	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, "", s.headRepo, s.hash, s.user, s.title))
+	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, "", s.headRepo, s.hash, s.user, s.title), nil)
 	s.Nil(intent)
 	s.Error(err)
 
-	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, "", s.user, s.title))
+	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, "", s.user, s.title), nil)
 	s.Nil(intent)
 	s.Error(err)
 
-	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, "", s.title))
+	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, "", s.title), nil)
 	s.Nil(intent)
 	s.Error(err)
 
 	// Creates new intent with callers
-	intent, err = NewGithubIntent(s.T().Context(), "2", "", AutomatedCaller, "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, "", s.title))
+	intent, err = NewGithubIntent(s.T().Context(), "2", "", AutomatedCaller, "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, "", s.title), nil)
 	s.Nil(intent)
 	s.Error(err)
 
-	intent, err = NewGithubIntent(s.T().Context(), "2", "", ManualCaller, "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, "", s.title))
+	intent, err = NewGithubIntent(s.T().Context(), "2", "", ManualCaller, "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, "", s.title), nil)
 	s.Nil(intent)
 	s.Error(err)
 
 	// PRs can't have an empty title
-	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, ""))
+	intent, err = NewGithubIntent(s.T().Context(), "2", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, ""), nil)
 	s.Nil(intent)
 	s.Error(err)
 
-	intent, err = NewGithubIntent(s.T().Context(), "4", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title))
+	intent, err = NewGithubIntent(s.T().Context(), "4", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title), nil)
 	s.NoError(err)
 	s.NotNil(intent)
 	s.Implements((*Intent)(nil), intent)
@@ -131,7 +131,7 @@ func (s *GithubSuite) TestNewGithubIntent() {
 		},
 	}
 	s.NoError(patch.Insert(s.T().Context()))
-	intent, err = NewGithubIntent(s.T().Context(), "4", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title))
+	intent, err = NewGithubIntent(s.T().Context(), "4", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title), nil)
 	s.NoError(err)
 	s.NotNil(intent)
 	s.Implements((*Intent)(nil), intent)
@@ -144,12 +144,12 @@ func (s *GithubSuite) TestNewGithubIntentSageBotUsesAssignee() {
 	assigneeLogin := "real-human"
 	var assigneeID int64 = 9999
 	pr := testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, evergreen.GitHubSageBotLogin, s.title)
-	pr.Assignee = &github.User{
+	botAssignee := &github.User{
 		Login: github.String(assigneeLogin),
 		ID:    github.Int64(assigneeID),
 	}
 
-	intent, err := NewGithubIntent(s.T().Context(), "sagebot-1", "", "", "", "", pr)
+	intent, err := NewGithubIntent(s.T().Context(), "sagebot-1", "", "", "", "", pr, botAssignee)
 	s.Require().NoError(err)
 	s.Require().NotNil(intent)
 
@@ -162,7 +162,7 @@ func (s *GithubSuite) TestNewGithubIntentSageBotUsesAssignee() {
 func (s *GithubSuite) TestNewGithubIntentSageBotNoAssigneeUsesBot() {
 	pr := testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, evergreen.GitHubSageBotLogin, s.title)
 
-	intent, err := NewGithubIntent(s.T().Context(), "sagebot-2", "", "", "", "", pr)
+	intent, err := NewGithubIntent(s.T().Context(), "sagebot-2", "", "", "", "", pr, nil)
 	s.Require().NoError(err)
 	s.Require().NotNil(intent)
 
@@ -173,7 +173,7 @@ func (s *GithubSuite) TestNewGithubIntentSageBotNoAssigneeUsesBot() {
 }
 
 func (s *GithubSuite) TestInsert() {
-	intent, err := NewGithubIntent(s.T().Context(), "1", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title))
+	intent, err := NewGithubIntent(s.T().Context(), "1", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title), nil)
 	s.NoError(err)
 	s.NotNil(intent)
 	s.NoError(intent.Insert(s.T().Context()))
@@ -193,7 +193,7 @@ func (s *GithubSuite) TestInsert() {
 }
 
 func (s *GithubSuite) TestFindIntentSpecifically() {
-	intent, err := NewGithubIntent(s.T().Context(), "300", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title))
+	intent, err := NewGithubIntent(s.T().Context(), "300", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title), nil)
 	s.NoError(err)
 	s.NotNil(intent)
 	s.NoError(intent.Insert(s.T().Context()))
@@ -212,7 +212,7 @@ func (s *GithubSuite) TestFindIntentSpecifically() {
 }
 
 func (s *GithubSuite) TestSetProcessed() {
-	intent, err := NewGithubIntent(s.T().Context(), "1", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title))
+	intent, err := NewGithubIntent(s.T().Context(), "1", "", "", "", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title), nil)
 	s.NoError(err)
 	s.NotNil(intent)
 	s.NoError(intent.Insert(s.T().Context()))
@@ -283,7 +283,7 @@ func (s *GithubSuite) TestFindUnprocessedGithubIntents() {
 
 func (s *GithubSuite) TestNewPatch() {
 	s.NoError(db.Clear(IntentCollection))
-	intent, err := NewGithubIntent(s.T().Context(), "4", "", "", "", s.baseHash, testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title))
+	intent, err := NewGithubIntent(s.T().Context(), "4", "", "", "", s.baseHash, testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title), nil)
 	s.NoError(err)
 	s.NotNil(intent)
 	s.NoError(intent.Insert(s.T().Context()))
@@ -317,7 +317,7 @@ func (s *GithubSuite) TestNewPatch() {
 
 func (s *GithubSuite) TestNewPatchWithCustomAlias() {
 	s.NoError(db.Clear(IntentCollection))
-	intent, err := NewGithubIntent(s.T().Context(), "4", "", "", "custom-alias", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title))
+	intent, err := NewGithubIntent(s.T().Context(), "4", "", "", "custom-alias", "", testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, s.user, s.title), nil)
 	s.NoError(err)
 	s.NotNil(intent)
 	s.NoError(intent.Insert(s.T().Context()))
