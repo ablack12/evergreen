@@ -144,12 +144,12 @@ func (s *GithubSuite) TestNewGithubIntentSageBotUsesAssignee() {
 	assigneeLogin := "real-human"
 	var assigneeID int64 = 9999
 	pr := testutil.NewGithubPR(s.pr, s.baseRepo, s.baseHash, s.headRepo, s.hash, evergreen.GitHubSageBotLogin, s.title)
-	botAssignee := &github.User{
+	assignee := &github.User{
 		Login: github.String(assigneeLogin),
 		ID:    github.Int64(assigneeID),
 	}
 
-	intent, err := NewGithubIntent(s.T().Context(), "sagebot-1", "", "", "", "", pr, botAssignee)
+	intent, err := NewGithubIntent(s.T().Context(), "sagebot-1", "", "", "", "", pr, assignee)
 	s.Require().NoError(err)
 	s.Require().NotNil(intent)
 
