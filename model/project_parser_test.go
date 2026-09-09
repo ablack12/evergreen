@@ -4212,6 +4212,30 @@ tasks:
 	assert.Equal(t, "shell.exec", tasksByName["include-task"].Commands[0].Command)
 }
 
+// TestDecodeWithAnchorsPopulatesRegistryOnDecodeFailure verifies that
+// decodeWithAnchors collects anchors into the registry even when the struct
+// decode step fails. This is a regression test: mergeAnchorsFrom was previously
+// called after node.Decode, so any struct-decode failure left the registry empty
+// and caused cross-file alias resolution to fail in subsequent include files.
+func TestDecodeWithAnchorsPopulatesRegistryOnDecodeFailure(t *testing.T) {
+	// This YAML defines an anchor but has a type mismatch on the tasks field
+	// (expects a list, gets a scalar) that causes node.Decode to fail.
+	yamlBytes := []byte(`
+defined_anchor: &my-anchor
+  command: shell.exec
+  params:
+    script: ./run.sh
+tasks: not-a-list
+`)
+	registry := &anchorRegistry{}
+	_, err := decodeWithAnchors(yamlBytes, false, registry)
+	assert.Error(t, err, "expected decode to fail due to type mismatch")
+	assert.Equal(t, 1, registry.Length(), "anchor should be collected even when struct decode fails")
+	if registry.Length() > 0 {
+		assert.Equal(t, "my-anchor", registry.entries[0].name)
+	}
+}
+
 // TestIncludeFileWithLocalAnchorOnlyParsesCorrectly verifies that a project whose
 // include file uses anchors only within that file (no cross-file aliases) parses
 // correctly regardless of whether cross-file anchors are enabled. This is the primary
