@@ -117,3 +117,14 @@ func (r *CreatePatchRequest) anyAliasSet() bool {
 func (r *CreatePatchRequest) anyTaskOrVariantSet() bool {
 	return len(r.Variants)+len(r.RegexVariants)+len(r.Tasks)+len(r.RegexTasks) > 0
 }
+
+// ClonePatchRequest is the optional request body for cloning a patch. All
+// fields are optional; everything else about the new patch (diffs, base
+// commit, task/variant definition, parameters) is copied from the source
+// patch.
+type ClonePatchRequest struct {
+	Description string `json:"description"`
+	// FinalizeResponse activates the cloned patch after creating it, starting
+	// its tasks.
+	FinalizeResponse bool `json:"finalize"`
+}
