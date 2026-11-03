@@ -4469,7 +4469,8 @@ func TestAnchorPreambleNormalization(t *testing.T) {
 		{name: "BlankLineThenSeparator", yml: "\n\n---\nfunctions:\n  f:\n    command: shell.exec\n", expectedFunctions: 1},
 		{name: "SequenceNotAbsorbed", yml: "- a\n- b\n", expectedFunctions: -1},
 		{name: "DirectiveStrippedAndStillGetsPreamble", yml: "%YAML 1.2\n---\nfunctions:\n  f:\n    command: shell.exec\n", expectedFunctions: 1},
-		{name: "SeparatorWithContentSameAsFlagOff", yml: "--- {a: b}\n", expectedFunctions: 0},
+		{name: "SeparatorWithInlineBlockContentPreserved", yml: "--- functions:\n  f:\n    command: shell.exec\n", expectedFunctions: 1},
+		{name: "SeparatorWithInlineFlowContentPreserved", yml: "--- {functions: {f: {command: shell.exec}}}\n", expectedFunctions: 1},
 		{name: "BOMBeforeMapping", yml: "\uFEFFfunctions:\n  f:\n    command: shell.exec\n", expectedFunctions: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

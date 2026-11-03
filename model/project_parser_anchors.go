@@ -173,7 +173,9 @@ func buildAnchorPreamble(registry *anchorRegistry) ([]byte, error) {
 
 // normalizeForPreamble strips the leading UTF-8 byte-order mark (which some editors prefix to config files), `%`-directive lines,
 // comments, blank lines, and `---` document separator markers from the file's bytes, up to the first line of real content.
-// This keeps the preamble and the file in a single YAML document (a second document would get silently dropped).
+// This keeps the preamble and the file in a single YAML document (a second document would get silently dropped). A `---`
+// separator carrying inline content keeps the content, so the content merges into the preamble's document rather than
+// forming a second one.
 func normalizeForPreamble(data []byte) []byte {
 	const utf8BOM = "\xef\xbb\xbf"
 	data = bytes.TrimPrefix(data, []byte(utf8BOM))
@@ -185,11 +187,32 @@ func normalizeForPreamble(data []byte) []byte {
 		isSeparator := strings.Trim(trimmed, "-") == ""
 		isComment := strings.HasPrefix(trimmed, "#")
 		if !isDirective && !isSeparator && !isComment {
+			// A `---` separator followed by inline content opens the document on that
+			// line. Keep the content but drop the separator prefix; leaving the
+			// separator in place would end the preamble's document and silently drop
+			// the file as a second document.
+			if content, ok := separatorInlineContent(trimmed); ok {
+				lineIndent := len(line) - len(trimmed)
+				// Content is a suffix of trimmed, so its offset is the dropped prefix length.
+				return data[i+lineIndent+(len(trimmed)-len(content)):]
+			}
 			return data[i:]
 		}
 		i += len(line) + 1 // skip the line and its newline
 	}
 	return nil
+}
+
+// separatorInlineContent returns the content following a `---` document separator
+// on the same line, with the separator and trailing whitespace removed. YAML only
+// treats `---` as a separator when followed by whitespace or end of line, so
+// `---foo` is a plain scalar and must be left untouched. Returns false when
+// trimmed is not a separator carrying inline content.
+func separatorInlineContent(trimmed string) (string, bool) {
+	if !strings.HasPrefix(trimmed, "---") || len(trimmed) <= 3 || (trimmed[3] != ' ' && trimmed[3] != '\t') {
+		return "", false
+	}
+	return strings.TrimLeft(trimmed[3:], " \t"), true
 }
 
 // stripEvgAnchorsKey removes the _evg_anchors key and its value from the
