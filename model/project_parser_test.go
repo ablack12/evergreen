@@ -4470,6 +4470,8 @@ func TestAnchorPreambleNormalization(t *testing.T) {
 		{name: "SequenceNotAbsorbed", yml: "- a\n- b\n", expectedFunctions: -1},
 		{name: "DirectiveStrippedAndStillGetsPreamble", yml: "%YAML 1.2\n---\nfunctions:\n  f:\n    command: shell.exec\n", expectedFunctions: 1},
 		{name: "SeparatorWithInlineBlockContentPreserved", yml: "--- functions:\n  f:\n    command: shell.exec\n", expectedFunctions: 1},
+		{name: "SeparatorWithInlineBlockContentCRLF", yml: "--- functions:\r\n  f:\r\n    command: shell.exec\r\n", expectedFunctions: 1},
+		{name: "SeparatorWithInlineBlockContentTrailingWhitespace", yml: "--- functions:   \n  f:\n    command: shell.exec\n", expectedFunctions: 1},
 		{name: "SeparatorWithInlineFlowContentPreserved", yml: "--- {functions: {f: {command: shell.exec}}}\n", expectedFunctions: 1},
 		{name: "BOMBeforeMapping", yml: "\uFEFFfunctions:\n  f:\n    command: shell.exec\n", expectedFunctions: 1},
 	} {
@@ -4481,6 +4483,10 @@ func TestAnchorPreambleNormalization(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Len(t, pp.Functions, tc.expectedFunctions)
+			// The first key must be intact: an off-by-one in the separator's
+			// offset math would truncate it (e.g. to "unctions") and the file
+			// would still parse successfully.
+			assert.Contains(t, pp.Functions, "f")
 		})
 	}
 }

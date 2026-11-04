@@ -192,7 +192,10 @@ func normalizeForPreamble(data []byte) []byte {
 			// separator in place would end the preamble's document and silently drop
 			// the file as a second document.
 			if content, ok := separatorInlineContent(trimmed); ok {
-				lineIndent := len(line) - len(trimmed)
+				// Measure only the leading whitespace of the line; trailing
+				// whitespace (including a CRLF carriage return) would otherwise
+				// overstate the indent and truncate the start of the content.
+				lineIndent := len(line) - len(strings.TrimLeft(string(line), " \t"))
 				// Content is a suffix of trimmed, so its offset is the dropped prefix length.
 				return data[i+lineIndent+(len(trimmed)-len(content)):]
 			}
